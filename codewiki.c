@@ -72,7 +72,6 @@ page_insert(char *s)
 	pp = malloc(sizeof *pp);
 	pp->str = s;
 
-//	printf("pushing: %s\n", s);
 	TAILQ_INSERT_TAIL(&page_contents, pp, entry);
 
 	return (0);
@@ -83,6 +82,9 @@ page_parse(char *from, char *to)
 {
 	char		*ptr, *prev_ptr;
 	struct tag	*m;
+
+	if (from == NULL)
+		return (0);
 
 	if (to)
 		*to = '\0';
@@ -116,7 +118,7 @@ page_parse(char *from, char *to)
 		}
 	}
 	page_insert(prev_ptr);
-	return 0;
+	return (0);
 }
 
 char *
@@ -130,6 +132,9 @@ page_get()
 	TAILQ_FOREACH(pp, &page_contents, entry) {
 		len += strlen(pp->str);
 	}
+
+	if (len == 0)
+		return NULL;
 
 	/* FIXME - handle errors */
 	buf = malloc(len+1);
@@ -166,7 +171,7 @@ page_print()
 	page_title = "blahblah";
 
 	/* Headers */
-	printf(
+	webserver_output(
 "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \n"
 "\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">\n"
 "<html>\n"
@@ -176,31 +181,31 @@ page_print()
 "http-equiv=\"Content-Type\" />\n", page_title);
 
 	TAILQ_FOREACH(pp, &stylesheets, entry) {
-		printf("<link href=\"%s\" media=\"all\" rel=\"stylesheet\" "
+		webserver_output("<link href=\"%s\" media=\"all\" rel=\"stylesheet\" "
 		    "type=\"text/css\"/>\n", pp->str);
 	}
 
 	TAILQ_FOREACH(pp, &scripts, entry) {
-		printf("<script type=\"text/javascript\" src=\"%s\">"
+		webserver_output("<script type=\"text/javascript\" src=\"%s\">"
 		    "</script>\n", pp->str);
 	}
 
-	printf("  </head>\n"
+	webserver_output("  </head>\n"
 	    "<body onload=\"sh_highlightDocument();\">\n"
 	    "<div id=\"body\">\n");
 
 	if (header != NULL)
-		printf("<div id=\"header\">%s</div>\n", header);
+		webserver_output("<div id=\"header\">%s</div>\n", header);
 
-	printf("  <div id=\"contents\">\n");
+	webserver_output("  <div id=\"contents\">\n");
 	TAILQ_FOREACH(pp, &page_contents, entry) {
-		printf("%s", pp->str);
+		webserver_output("%s", pp->str);
 	}
-	printf("  </div>\n");
+	webserver_output("  </div>\n");
 	if (footer != NULL)
-		printf("<div id=\"footer\">%s</div>\n", footer);
+		webserver_output("<div id=\"footer\">%s</div>\n", footer);
 
-	printf("</div>\n"
+	webserver_output("</div>\n"
 	    "</body>\n"
 	    "</html>\n");
 
@@ -213,7 +218,7 @@ page_edit(char *page_data, char *page_name)
 	/* Generate edit-interface */
 
 	/* Headers */
-	printf(
+	webserver_output(
 "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \n"
 "\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">\n"
 "<html>\n"
@@ -222,45 +227,48 @@ page_edit(char *page_data, char *page_name)
 "    <meta content=\"text/html; charset=UTF-8\" "
 "http-equiv=\"Content-Type\" />\n", page_name);
 
-	printf("<link href=\"static/admin.css\" media=\"all\" "
+	webserver_output("<link href=\"static/admin.css\" media=\"all\" "
 	    "rel=\"stylesheet\" type=\"text/css\"/>\n");
 
-	printf("<script type=\"text/javascript\" src=\"js/admin.js\">"
+	webserver_output("<script type=\"text/javascript\" src=\"js/admin.js\">"
 		    "</script>\n");
 
-	printf("  </head>\n"
+	webserver_output("  </head>\n"
 	    "<body>\n"
 	    "<div id=\"body\">\n");
 
 	if (header != NULL)
-		printf("<div id=\"header\">%s</div>\n", header);
+		webserver_output("<div id=\"header\">%s</div>\n", header);
 
-	printf("<form method=\"POST\" action=\"?\">\n"
+	webserver_output("<form method=\"POST\" action=\"?\">\n"
 	    "<input type=\"hidden\" name=\"page\" value=\"%s\" />\n"
 	    "<input type=\"hidden\" name=\"time\" value=\"%ld\" />\n"
 	    "<input type=\"hidden\" name=\"save\" value=\"1\" />\n",
 	    page_name, time(NULL));
-	printf("<div id=\"contents\">\n"
+	webserver_output("<div id=\"contents\">\n"
 	    "<h2>Editing page %s</h2>\n"
 	    "<textarea id=\"wikiText\" name=\"wikiText\" tabindex=\"1\">\n",
 	    page_name);
-	printf("%s", page_data);
-	printf("</textarea>");
 
-	printf("<input type=\"submit\" value=\"Save\" />\n"
+	if (page_data != NULL)
+		webserver_output("%s", page_data);
+
+	webserver_output("</textarea>");
+
+	webserver_output("<input type=\"submit\" value=\"Save\" />\n"
 	    "</div>\n"
 	    "</form>\n");
-	if (footer != NULL)
-		printf("<div id=\"footer\">%s</div>\n", footer);
 
-	printf("</div>\n"
+	if (footer != NULL)
+		webserver_output("<div id=\"footer\">%s</div>\n", footer);
+
+	webserver_output("</div>\n"
 	    "</body>\n"
 	    "</html>\n");
 
 	return (0);
 
 }
-
 
 int
 page_serve(char *requested_page, int edit_page)
@@ -275,13 +283,17 @@ page_serve(char *requested_page, int edit_page)
 		st = wiki_stat_page(requested_page);
 		if (st == STAT_PAGE_NO_UPDATES) {
 			page = wiki_load_generated(requested_page);
-			printf("%s", page);
+			webserver_output("%s", page);
 			free(page);
 			return 0;
 		}
 	}
 
 	init_tags();
+
+	header = NULL;
+	footer = NULL;
+
 	TAILQ_INIT(&page_contents);
 	TAILQ_INIT(&stylesheets);
 	TAILQ_INIT(&scripts);
@@ -292,26 +304,31 @@ page_serve(char *requested_page, int edit_page)
 		 * generated.html
 		 */
 		page = wiki_load_data("_header");
-		page_parse(page, NULL);
-		header = page_get();
-		wiki_save_generated("_header", header);
-		page_clear();
-		free(page);
-	} else
+		if (page) {
+			page_parse(page, NULL);
+			header = page_get();
+			wiki_save_generated("_header", header);
+			page_clear();
+			free(page);
+		}
+	} else 
 		header = wiki_load_generated("_header");
 
 	if (st & STAT_PAGE_UPDATED_FOOTER) {
 		/* Generate footer */
 		page = wiki_load_data("_footer");
-		page_parse(page, NULL);
-		footer = page_get();
-		wiki_save_generated("_footer", footer);
-		page_clear();
-		free(page);
+		if (page) {
+			page_parse(page, NULL);
+			footer = page_get();
+			wiki_save_generated("_footer", footer);
+			page_clear();
+			free(page);
+		}
 	} else
 		footer = wiki_load_generated("_footer");
 
-	stylesheet_add("css/main.css");
+	/*strdup_sprintf("%s/css/main.css", static_url);*/
+	stylesheet_add("static/css/main.css");
 
 	page = wiki_load_data(requested_page);
 	if (edit_page)

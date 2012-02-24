@@ -77,5 +77,6 @@ int stylesheet_add(char *);
 int script_add(char *);
 int page_serve(char *requested_page, int edit_page);
 
-
+/* Differs between CGI-implementations */
+int webserver_output(char *, ...);
 #endif
