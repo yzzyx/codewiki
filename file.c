@@ -1,6 +1,9 @@
+#include <sys/stat.h>
 #include <stdio.h>
 #include <limits.h>
 #include <malloc.h>
+#include <string.h>
+#include <errno.h>
 #include "codewiki.h"
 
 char *
@@ -26,7 +29,7 @@ file_get_contents(char *filename)
 		if (ferror(fd)) {
 			free(contents);
 			fclose(fd);
-			return NULL;
+			return (NULL);
 		}
 
 		if (nb < BUF_SIZE) break;
@@ -34,10 +37,11 @@ file_get_contents(char *filename)
 		contents = realloc(contents, tot_nb + BUF_SIZE);
 		if (contents == NULL) {
 			fclose(fd);
-			return NULL;
+			return (NULL);
 		}
 		ptr = contents + tot_nb;
 	}
+	*ptr = '\0';
 
 	fclose(fd);
 	return contents;
@@ -54,56 +58,47 @@ file_set_contents(const char *filename, const char *contents)
 
 	/* Create directory structure if needed */
 	dir = strdup(filename);
-	ptr = strrchr(dir, "/");
+	ptr = strrchr(dir, '/');
 	if (ptr == NULL) {
 		errno = ENOENT;
-		return -1;
+		return (-1);
 	}
 	*ptr = '\0';
 
-	if (stat(dir, st) != 0) {
+	if (stat(dir, &st) != 0) {
 		if (mkdir(dir, 0000) == -1)
-			return -1;
+			return (-1);
 	} else {
 		if (!S_ISDIR(st.st_mode)) {
 			errno = ENOENT;
-			return -1;
+			return (-1);
 		}
 	}
 	
 	if ((fd = fopen(filename, "w")) == NULL)
-		return NULL;
+		return (-1);
 
-	nb = 0;
-	tot_nb = strlen(contents);
-	ptr = contents;
-	while(nb < tot_nb) {
-		nb = fread(ptr, 1, BUF_SIZE, fd);
-		if (ferror(fd)) {
-			free(contents);
+	tot_nb = 0;
+	ptr = (char *)contents;
+	while (contents && tot_nb < strlen(contents)) {
+		nb = fwrite(ptr, 1, strlen(ptr), fd);
+		if (ferror(fd) || nb == 0) {
 			fclose(fd);
-			return NULL;
+			return (-1);
 		}
-
-		if (nb < BUF_SIZE) break;
 		tot_nb += nb;
-		contents = realloc(contents, tot_nb + BUF_SIZE);
-		if (contents == NULL) {
-			fclose(fd);
-			return NULL;
-		}
-		ptr = contents + tot_nb;
+		ptr += nb;
 	}
 
 	fclose(fd);
-	return contents;
+	return (0);
 }
 
 int
 wiki_stat_page(const char *page)
 {
 	return STAT_PAGE_UPDATED_PAGE | STAT_PAGE_UPDATED_HEADER |
-	    STAT_PAGE_UPDATE_FOOTER;
+	    STAT_PAGE_UPDATED_FOOTER;
 }
 
 int

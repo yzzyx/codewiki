@@ -27,6 +27,7 @@ int generate_tag_bold(struct tag *, char *);
 int generate_tag_italic(struct tag *, char *);
 int generate_tag_underline(struct tag *, char *);
 int generate_tag_link(struct tag *, char *);
+int generate_tag_header(struct tag *, char *);
 int generate_tag_image(struct tag *, char *);
 int generate_tag_inline_code(struct tag *, char *);
 int generate_tag_code(struct tag *, char *);
@@ -40,6 +41,7 @@ struct tag static_tags[] =
 	{"//", generate_tag_italic },
 	{"__", generate_tag_underline },
 	{"[[", generate_tag_link },
+	{"==", generate_tag_header },
 	{"{{", generate_tag_image },
 	{"<code", generate_tag_code },
 	/*
@@ -133,6 +135,27 @@ generate_tag_underline(struct tag *t, char *ptr)
 	t->start_ptr = ptr + 2; /* strlen("__"); */
 	t->end_ptr = ptr + 2;
 	for (; *t->end_ptr && strncmp(t->end_ptr, "__", 2) != 0;
+			t->end_ptr ++);
+
+	/* Make sure that we don't print or parse the end-marker */
+	t->skip_ptr = t->end_ptr;
+	if (*t->end_ptr)
+		t->skip_ptr += 2;
+	t->parse = 1; /* parse contents */
+
+	return (1);
+}
+
+int
+generate_tag_header(struct tag *t, char *ptr)
+{
+	t->start_tag = "<h2>";
+	t->end_tag = "</h2>";
+
+	/* Anything within our tag * should be parsed */
+	t->start_ptr = ptr + 2; /* strlen("=="); */
+	t->end_ptr = ptr + 2;
+	for (; *t->end_ptr && strncmp(t->end_ptr, "==", 2) != 0;
 			t->end_ptr ++);
 
 	/* Make sure that we don't print or parse the end-marker */
@@ -307,6 +330,9 @@ generate_tag_code(struct tag *t, char *ptr)
 			}
 		}
 	}
+
+	/* FIXME! */
+	language = "c";
 
 	/* Calculate how much memory we need */
 	title_format = "<span class=\"shtitle\">%s</span>\n";
