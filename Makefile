@@ -1,15 +1,20 @@
 CFLAGS+=-Wall -ggdb3 -Ideps/libasn -Ideps/libscgi -Ideps
 SRCS=$(shell ls *.c)
-OBJS=$(SRCS:.c=.o)
+OBJS=file.o tags.o codewiki.o
 DEPS= $(addsuffix .depend, $(OBJS))
 
 CC?=gcc
 
-all: codewiki-scgi
+all: codewiki-fcgi codewiki-test
+
+codewiki-test: $(OBJS) codewiki-test.o
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $+
 
 codewiki-scgi: $(OBJS) codewiki-scgi.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $+ deps/libscgi/libscgi.a deps/libasn/libasn.a
 
+codewiki-fcgi: $(OBJS) codewiki-fcgi.o
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $+ -lfcgi
 %.o: %.c
 	@echo "Generating $@.depend"
 	@$(CC) -MM $(CFLAGS) $< | \
