@@ -6,7 +6,7 @@
 #include <errno.h>
 #include "codewiki.h"
 
-char *
+static char *
 file_get_contents(char *filename)
 {
 	FILE		*fd;
@@ -22,6 +22,7 @@ file_get_contents(char *filename)
 		return NULL;
 	}
 
+	nb = 0;
 	tot_nb = 0;
 	ptr = contents;
 	while(!feof(fd)) {
@@ -32,6 +33,7 @@ file_get_contents(char *filename)
 			return (NULL);
 		}
 
+
 		if (nb < BUF_SIZE) break;
 		tot_nb += nb;
 		contents = realloc(contents, tot_nb + BUF_SIZE);
@@ -41,13 +43,13 @@ file_get_contents(char *filename)
 		}
 		ptr = contents + tot_nb;
 	}
-	*ptr = '\0';
+	ptr[nb] = '\0';
 
 	fclose(fd);
 	return contents;
 }
 
-int
+static int
 file_set_contents(const char *filename, const char *contents)
 {
 	struct stat	st;
@@ -66,7 +68,7 @@ file_set_contents(const char *filename, const char *contents)
 	*ptr = '\0';
 
 	if (stat(dir, &st) != 0) {
-		if (mkdir(dir, 0000) == -1)
+		if (mkdir(dir, 0777) == -1)
 			return (-1);
 	} else {
 		if (!S_ISDIR(st.st_mode)) {
@@ -74,6 +76,7 @@ file_set_contents(const char *filename, const char *contents)
 			return (-1);
 		}
 	}
+	free(dir);
 	
 	if ((fd = fopen(filename, "w")) == NULL)
 		return (-1);
@@ -119,6 +122,26 @@ wiki_load_generated(const char *page)
 	snprintf(filename, sizeof filename, "%s/%s/generated.html",
 	    CONTENTS_DIR, page);
 	return file_get_contents(filename);
+}
+
+int
+wiki_save_data(const char *page, const char *data)
+{
+	char		filename[PATH_MAX];
+	char		new_file[PATH_MAX];
+	struct stat	st;
+
+	snprintf(filename, sizeof filename, "%s/%s/latest.txt",
+	    CONTENTS_DIR, page);
+
+	stat(filename, &st);
+	snprintf(new_file, sizeof new_file, "%s/%s/%ld.txt",
+	    CONTENTS_DIR, page, st.st_mtime);
+
+	/* FIXME - check if file exists already */
+	rename(filename, new_file);
+
+	return file_set_contents(filename, data);
 }
 
 char *
