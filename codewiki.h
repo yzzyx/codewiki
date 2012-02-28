@@ -55,14 +55,29 @@ struct tag *find_tag(char *);
 void init_tags();
 
 /* Backend */
-#define		STAT_PAGE_NO_UPDATES		(0)
-#define		STAT_PAGE_UPDATED_PAGE		(1)
-#define		STAT_PAGE_UPDATED_HEADER	(2)
-#define		STAT_PAGE_UPDATED_FOOTER	(3)
+#define STAT_PAGE_NO_UPDATES		(0)
+#define STAT_PAGE_UPDATED_PAGE		(1)
+#define STAT_PAGE_UPDATED_HEADER	(2)
+#define STAT_PAGE_UPDATED_FOOTER	(3)
 int wiki_stat_page(const char *);
 char *wiki_load_generated(const char *);
 char *wiki_load_data(const char *);
+int wiki_save_data(const char *, const char *);
 int wiki_save_generated(const char *, const char *);
+
+#define WIKI_LOGIN_OK			(0)
+#define WIKI_LOGIN_WRONG_PASSWORD	(1)
+#define WIKI_LOGIN_ERROR		(2)
+int wiki_login(const char *,const char *);
+char *wiki_ticket_get(const char *);
+
+#define WIKI_TICKET_READ		(1)
+#define WIKI_TICKET_WRITE		(2)
+#define WIKI_TICKET_GRANT		(4)
+#define WIKI_TICKET_ADMIN		(8)
+int wiki_ticket_access(const char *, const char *);
+int wiki_ticket_clear(const char *);
+
 
 /* functions not yet implemented:
 int wiki_save_data(const char *, const char *);
@@ -75,7 +90,11 @@ char *wiki_load_revision(const char *, struct revision *)
 /* Common */
 int stylesheet_add(char *);
 int script_add(char *);
-int page_serve(char *requested_page, int edit_page);
+
+int page_init();
+int page_serve(char *, int);
+int page_clear();
+int page_cleanup();
 
 /* Differs between CGI-implementations */
 int webserver_output(char *, ...);

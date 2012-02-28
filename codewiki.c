@@ -64,7 +64,7 @@ script_add(char *file)
 	return (0);
 }
 
-int
+static int
 page_insert(char *s)
 {
 	struct page_part	*pp;
@@ -77,7 +77,7 @@ page_insert(char *s)
 	return (0);
 }
 
-int
+static int
 page_parse(char *from, char *to)
 {
 	char		*ptr, *prev_ptr;
@@ -121,7 +121,7 @@ page_parse(char *from, char *to)
 	return (0);
 }
 
-char *
+static char *
 page_get()
 {
 	struct page_part	*pp;
@@ -154,15 +154,28 @@ page_clear()
 {
 	struct page_part	*pp;
 
-	TAILQ_FOREACH(pp, &page_contents, entry) {
+	while(page_contents.tqh_first != NULL) {
+		pp = page_contents.tqh_first;
 		TAILQ_REMOVE(&page_contents, pp, entry);
+		free(pp);
+	}
+
+	while(stylesheets.tqh_first != NULL) {
+		pp = stylesheets.tqh_first;
+		TAILQ_REMOVE(&stylesheets, pp, entry);
+		free(pp);
+	}
+
+	while(scripts.tqh_first != NULL) {
+		pp = scripts.tqh_first;
+		TAILQ_REMOVE(&scripts, pp, entry);
 		free(pp);
 	}
 
 	return (0);
 }
 
-int
+static int
 page_print()
 {
 	struct page_part	*pp;
@@ -212,7 +225,7 @@ page_print()
 	return (0);
 }
 
-int
+static int
 page_edit(char *page_data, char *page_name)
 {
 	/* Generate edit-interface */
@@ -241,7 +254,7 @@ page_edit(char *page_data, char *page_name)
 		webserver_output("<div id=\"header\">%s</div>\n", header);
 
 	webserver_output("<form method=\"POST\" action=\"?\">\n"
-	    "<input type=\"hidden\" name=\"page\" value=\"%s\" />\n"
+	    "<input type=\"hidden\" name=\"p\" value=\"%s\" />\n"
 	    "<input type=\"hidden\" name=\"time\" value=\"%ld\" />\n"
 	    "<input type=\"hidden\" name=\"save\" value=\"1\" />\n",
 	    page_name, time(NULL));
@@ -271,6 +284,18 @@ page_edit(char *page_data, char *page_name)
 }
 
 int
+page_init()
+{
+	init_tags();
+
+	TAILQ_INIT(&page_contents);
+	TAILQ_INIT(&stylesheets);
+	TAILQ_INIT(&scripts);
+
+	return (0);
+}
+
+int
 page_serve(char *requested_page, int edit_page)
 {
 	char		*page;
@@ -282,21 +307,16 @@ page_serve(char *requested_page, int edit_page)
 		 */
 		st = wiki_stat_page(requested_page);
 		if (st == STAT_PAGE_NO_UPDATES) {
+			fprintf(stderr, "no update, send generated");
 			page = wiki_load_generated(requested_page);
 			webserver_output("%s", page);
 			free(page);
-			return 0;
+			return (0);
 		}
 	}
 
-	init_tags();
-
 	header = NULL;
 	footer = NULL;
-
-	TAILQ_INIT(&page_contents);
-	TAILQ_INIT(&stylesheets);
-	TAILQ_INIT(&scripts);
 
 	if (st & STAT_PAGE_UPDATED_HEADER) {
 		/* Generate header */
@@ -311,7 +331,7 @@ page_serve(char *requested_page, int edit_page)
 			page_clear();
 			free(page);
 		}
-	} else 
+	} else
 		header = wiki_load_generated("_header");
 
 	if (st & STAT_PAGE_UPDATED_FOOTER) {
@@ -330,10 +350,13 @@ page_serve(char *requested_page, int edit_page)
 	/*strdup_sprintf("%s/css/main.css", static_url);*/
 	stylesheet_add("static/css/main.css");
 
+	fprintf(stderr, "loading page %s\n", requested_page);
 	page = wiki_load_data(requested_page);
-	if (edit_page)
+	if (edit_page) {
+		fprintf(stderr, "edit page %s\n", requested_page);
 		page_edit(page, requested_page);
-	else {
+	} else {
+		fprintf(stderr, "parsing page %s\n", requested_page);
 		page_parse(page, NULL);
 		page_print();
 	}
@@ -343,5 +366,31 @@ page_serve(char *requested_page, int edit_page)
 		free(header);
 	if (footer)
 		free(footer);
-	return 0;
+	return (0);
+}
+
+int
+wiki_login(const char *username, const char *password)
+{
+	/* FIXME - check wiki-passwdfile */
+	return WIKI_LOGIN_OK;
+}
+
+char *
+wiki_ticket_get(const char *username)
+{
+	/* FIXME - get value from wiki-passwdfile */
+	return strdup("ABCDEFGHIJKLMN=)SASAFJKSF");
+}
+
+int
+wiki_ticket_access(const char *ticket, const char *page)
+{
+	return WIKI_TICKET_READ | WIKI_TICKET_WRITE;
+}
+
+int
+wiki_ticket_clear(const char *ticket)
+{
+	return (0);
 }
