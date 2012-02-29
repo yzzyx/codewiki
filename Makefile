@@ -1,4 +1,5 @@
-CFLAGS+=-Wall -ggdb3 -Ideps/libasn -Ideps/libscgi -Ideps
+
+CFLAGS+=-Wall -ggdb3
 SRCS=$(shell ls *.c)
 OBJS=file.o tags.o codewiki.o
 DEPS= $(addsuffix .depend, $(OBJS))

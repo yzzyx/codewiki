@@ -17,14 +17,37 @@
 */
 #ifndef __CODEWIKI_H
 #define __CODEWIKI_H
+#include "config.h"
 #include <sys/types.h>
+
+#if HAVE_QUEUE_H
+#include <queue.h>
+#elif HAVE_SYS_QUEUE_H
 #include <sys/queue.h>
-#include "tree.h"
+#elif HAVE_BSD_QUEUE_H
+#include <bsd/queue.h>
+#else
+#include "queue.h" /* Use local implementation */
+#endif
+
+#if HAVE_TREE_H
+#include <sys/tree.h>
+#elif HAVE_BSD_TREE_H
+#include <bsd/sys/tree.h>
+#else
+#include "tree.h" /* Use local implementation */
+#endif
 
 /* FIXME - configurable settings */
 #define CONTENTS_DIR	".contents"
 #define BUF_SIZE	8000
 #define PTRS_SIZE	100
+
+#ifdef DEBUG
+#define DPRINTF(x,...)		fprintf(stderr,x,...)
+#else
+#define DPRINTF(x,...)
+#endif
 
 /* Page */
 struct page_part {
@@ -97,5 +120,6 @@ int page_clear();
 int page_cleanup();
 
 /* Differs between CGI-implementations */
-int webserver_output(char *, ...);
+int webserver_output(const char *, ...);
+int webserver_output_buf(const char *, int);
 #endif

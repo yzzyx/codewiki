@@ -1,0 +1,48 @@
+#!/bin/sh
+
+checkHeader()
+{
+	HEADER=$1
+	TMP=`tempfile --suffix .c`
+	echo -n "Checking for $HEADER "
+	cat > $TMP << EOF
+#include <$HEADER>
+int main(int argc, char *argv[]){ return 1;}
+EOF
+
+	$CC -o $TMP.o -c $TMP > /dev/null 2>&1
+	if [ $? -eq 0 ]; then
+		echo "[yes]"
+		return 1
+	else
+		echo "[no]"
+		return 0
+	fi
+
+	rm $TMP
+}
+
+checkHeader "fcgi_stdio.h"
+HAVE_FCGI_H=$?
+checkHeader "queue.h"
+HAVE_QUEUE_H=$?
+checkHeader "sys/queue.h"
+HAVE_SYS_QUEUE_H=$?
+checkHeader "bsd/queue.h"
+HAVE_BSD_QUEUE_H=$?
+checkHeader "sys/tree.h"
+HAVE_TREE_H=$?
+checkHeader "bsd/sys/tree.h"
+HAVE_BSD_TREE_H=$?
+
+cat > config.h << EOF
+#define HAVE_FCGI_H $HAVE_FCGI_H
+#define HAVE_QUEUE_H $HAVE_QUEUE_H
+#define HAVE_SYS_QUEUE_H $HAVE_SYS_QUEUE_H
+#define HAVE_BSD_QUEUE_H $HAVE_BSD_QUEUE_H
+#define HAVE_TREE_H $HAVE_TREE_H
+#define HAVE_BSD_TREE_H $HAVE_BSD_TREE_H
+EOF
+
+#TODO -> fix Makefile, only try to compile the versions we can actually
+# build
