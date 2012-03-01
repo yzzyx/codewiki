@@ -22,21 +22,22 @@
 #include <ctype.h>
 #include "codewiki.h"
 
-int generate_tag_br(struct tag *, char *);
-int generate_tag_bold(struct tag *, char *);
-int generate_tag_italic(struct tag *, char *);
-int generate_tag_underline(struct tag *, char *);
-int generate_tag_link(struct tag *, char *);
-int generate_tag_header(struct tag *, char *);
-int generate_tag_image(struct tag *, char *);
-int generate_tag_inline_code(struct tag *, char *);
-int generate_tag_code(struct tag *, char *);
+int generate_tag_br(struct wiki_request *r, struct tag *, char *);
+int generate_tag_bold(struct wiki_request *r, struct tag *, char *);
+int generate_tag_italic(struct wiki_request *r, struct tag *, char *);
+int generate_tag_underline(struct wiki_request *r, struct tag *, char *);
+int generate_tag_link(struct wiki_request *r, struct tag *, char *);
+int generate_tag_header(struct wiki_request *r, struct tag *, char *);
+int generate_tag_image(struct wiki_request *r, struct tag *, char *);
+int generate_tag_inline_code(struct wiki_request *r, struct tag *, char *);
+int generate_tag_code(struct wiki_request *r, struct tag *, char *);
 
 struct tag_list tags;
 
 struct tag static_tags[] =
 {
 	{"\n", generate_tag_br },
+	{"\r\n", generate_tag_br },
 	{"**", generate_tag_bold },
 	{"//", generate_tag_italic },
 	{"__", generate_tag_underline },
@@ -68,12 +69,20 @@ tags_rb_cmp(struct tag *a, struct tag *b)
 RB_GENERATE(tag_list, tag, entry, tags_rb_cmp);
 
 int
-generate_tag_br(struct tag *t, char *ptr)
+generate_tag_br(struct wiki_request *r, struct tag *t, char *ptr)
 {
+	int new_lines;
+
+	new_lines = 0;
+
 	/* only generate tag if we're starting a new paragraph */
 	t->skip_ptr = ptr + 1;
-	for (; *t->skip_ptr == '\n' || *t->skip_ptr == ' '; t->skip_ptr ++);
-	if (t->skip_ptr == ptr + 1)
+	for (; *t->skip_ptr == '\r' ||
+	       *t->skip_ptr == '\n' ||
+	       *t->skip_ptr == ' '; t->skip_ptr ++)
+		if (*t->skip_ptr == '\n') new_lines ++;
+
+	if (new_lines <= 1)
 		return (0);
 
 	t->start_tag = "<br />\n<br />\n";
@@ -84,7 +93,7 @@ generate_tag_br(struct tag *t, char *ptr)
 }
 
 int
-generate_tag_bold(struct tag *t, char *ptr)
+generate_tag_bold(struct wiki_request *r, struct tag *t, char *ptr)
 {
 	t->start_tag = "<b>";
 	t->end_tag = "</b>";
@@ -105,7 +114,7 @@ generate_tag_bold(struct tag *t, char *ptr)
 }
 
 int
-generate_tag_italic(struct tag *t, char *ptr)
+generate_tag_italic(struct wiki_request *r, struct tag *t, char *ptr)
 {
 	t->start_tag = "<i>";
 	t->end_tag = "</i>";
@@ -126,7 +135,7 @@ generate_tag_italic(struct tag *t, char *ptr)
 }
 
 int
-generate_tag_underline(struct tag *t, char *ptr)
+generate_tag_underline(struct wiki_request *r, struct tag *t, char *ptr)
 {
 	t->start_tag = "<u>";
 	t->end_tag = "</u>";
@@ -147,7 +156,7 @@ generate_tag_underline(struct tag *t, char *ptr)
 }
 
 int
-generate_tag_header(struct tag *t, char *ptr)
+generate_tag_header(struct wiki_request *r, struct tag *t, char *ptr)
 {
 	t->start_tag = "<h2>";
 	t->end_tag = "</h2>";
@@ -168,7 +177,7 @@ generate_tag_header(struct tag *t, char *ptr)
 }
 
 int
-generate_tag_link(struct tag *t, char *ptr)
+generate_tag_link(struct wiki_request *r, struct tag *t, char *ptr)
 {
 	char		*tag;
 	char		*link, *label;
@@ -217,7 +226,7 @@ generate_tag_link(struct tag *t, char *ptr)
 }
 
 int
-generate_tag_image(struct tag *t, char *ptr)
+generate_tag_image(struct wiki_request *r, struct tag *t, char *ptr)
 {
 	char		*tag;
 	char		*src, *label;
@@ -268,7 +277,7 @@ generate_tag_image(struct tag *t, char *ptr)
 }
 
 int
-generate_tag_code(struct tag *t, char *ptr)
+generate_tag_code(struct wiki_request *r, struct tag *t, char *ptr)
 {
 	char		*title, *language;
 	char		*title_format, *language_format;
@@ -276,8 +285,8 @@ generate_tag_code(struct tag *t, char *ptr)
 	char		boundary;
 	int		len;
 
-	stylesheet_add("css/sh.css");
-	script_add("js/sh_main.min.js");
+	stylesheet_add(r, "/static/css/sh.css");
+	script_add(r, "/static/js/sh_main.min.js");
 
 	/* The code tag has the following syntax:
 	 *
@@ -351,8 +360,8 @@ generate_tag_code(struct tag *t, char *ptr)
 	if (language != NULL) {
 		char js_file[PATH_MAX];
 		snprintf(js_file, sizeof js_file,
-		    "js/sh_lang/sh_%s.min.js", language);
-		script_add(js_file);
+		    "/static/js/sh_lang/sh_%s.min.js", language);
+		script_add(r, js_file);
 
 		sprintf(tag + strlen(tag), language_format, language);
 	} else
@@ -369,7 +378,7 @@ generate_tag_code(struct tag *t, char *ptr)
 	return (1);
 }
 
-struct tag *find_tag(char *p)
+struct tag *find_tag(struct wiki_request *r, char *p)
 {
 	struct tag	search;
 	struct tag	*m;
@@ -380,7 +389,7 @@ struct tag *find_tag(char *p)
 	if (!m)
 		return NULL;
 
-	if (m->generate_tag(m, p))
+	if (m->generate_tag(r, m, p))
 		return m;
 	return NULL;
 }

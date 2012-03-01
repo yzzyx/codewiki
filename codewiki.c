@@ -23,62 +23,60 @@
 #include <time.h>
 #include "codewiki.h"
 
-struct page_part_list page_contents;
-struct page_part_list stylesheets;
-struct page_part_list scripts;
+struct config config;
 
 char *header = NULL;
 char *footer = NULL;
 
 int
-stylesheet_add(char *file)
+stylesheet_add(struct wiki_request *r, char *file)
 {
 	struct page_part	*pp;
 
 	/* FIXME - sanitize input */
-	TAILQ_FOREACH(pp, &stylesheets, entry) {
+	TAILQ_FOREACH(pp, &r->stylesheets, entry) {
 		if (strcmp(pp->str, file) == 0)
 			return (0);
 	}
 
 	pp = malloc(sizeof *pp);
 	pp->str = file;
-	TAILQ_INSERT_TAIL(&stylesheets, pp, entry);
+	TAILQ_INSERT_TAIL(&r->stylesheets, pp, entry);
 	return (0);
 }
 
 int
-script_add(char *file)
+script_add(struct wiki_request *r, char *file)
 {
 	struct page_part	*pp;
 
 	/* FIXME - sanitize input */
-	TAILQ_FOREACH(pp, &scripts, entry) {
+	TAILQ_FOREACH(pp, &r->scripts, entry) {
 		if (strcmp(pp->str, file) == 0)
 			return (0);
 	}
 
 	pp = malloc(sizeof *pp);
 	pp->str = file;
-	TAILQ_INSERT_TAIL(&scripts, pp, entry);
+	TAILQ_INSERT_TAIL(&r->scripts, pp, entry);
 	return (0);
 }
 
 static int
-page_insert(char *s)
+page_insert(struct wiki_request *r, char *s)
 {
 	struct page_part	*pp;
 
 	pp = malloc(sizeof *pp);
 	pp->str = s;
 
-	TAILQ_INSERT_TAIL(&page_contents, pp, entry);
+	TAILQ_INSERT_TAIL(&r->page_contents, pp, entry);
 
 	return (0);
 }
 
 static int
-page_parse(char *from, char *to)
+page_parse(struct wiki_request *r, char *from, char *to)
 {
 	char		*ptr, *prev_ptr;
 	struct tag	*m;
@@ -90,46 +88,46 @@ page_parse(char *from, char *to)
 		*to = '\0';
 	prev_ptr = from;
 	for (ptr = from; *ptr && ptr != to; ptr++) {
-		m = find_tag(ptr);
+		m = find_tag(r, ptr);
 		if (m) {
 
 			/* push previous data and start-tag to head*/
 			*ptr = '\0';
 			if (prev_ptr < ptr)
-				page_insert(prev_ptr);
-			page_insert(m->start_tag);
+				page_insert(r, prev_ptr);
+			page_insert(r, m->start_tag);
 
 			/* parse everything inbetween (if anything) */
 			if (m->end_ptr) {
 				if (m->parse)
-					page_parse(m->start_ptr, m->end_ptr);
+					page_parse(r, m->start_ptr, m->end_ptr);
 				else {
 					*m->end_ptr = '\0';
-					page_insert(m->start_ptr);
+					page_insert(r, m->start_ptr);
 				}
 			}
 
 			/* push end-tag */
 			if (m->end_tag)
-				page_insert(m->end_tag);
+				page_insert(r, m->end_tag);
 
 			prev_ptr = m->skip_ptr;
 			ptr = m->skip_ptr - 1;
 		}
 	}
-	page_insert(prev_ptr);
+	page_insert(r, prev_ptr);
 	return (0);
 }
 
 static char *
-page_get()
+page_get(struct wiki_request *r)
 {
 	struct page_part	*pp;
 	char			*buf, *ptr;
 	int			len = 0;
 
 	/* Calculate size of buffer */
-	TAILQ_FOREACH(pp, &page_contents, entry) {
+	TAILQ_FOREACH(pp, &r->page_contents, entry) {
 		len += strlen(pp->str);
 	}
 
@@ -141,7 +139,7 @@ page_get()
 
 	/* Copy all data to buffer */
 	ptr = buf;
-	TAILQ_FOREACH(pp, &page_contents, entry) {
+	TAILQ_FOREACH(pp, &r->page_contents, entry) {
 		strcpy(ptr, pp->str);
 		ptr += strlen(ptr);
 	}
@@ -149,39 +147,10 @@ page_get()
 	return buf;
 }
 
-int
-page_clear()
-{
-	struct page_part	*pp;
-
-	while(page_contents.tqh_first != NULL) {
-		pp = page_contents.tqh_first;
-		TAILQ_REMOVE(&page_contents, pp, entry);
-		free(pp);
-	}
-
-	while(stylesheets.tqh_first != NULL) {
-		pp = stylesheets.tqh_first;
-		TAILQ_REMOVE(&stylesheets, pp, entry);
-		free(pp);
-	}
-
-	while(scripts.tqh_first != NULL) {
-		pp = scripts.tqh_first;
-		TAILQ_REMOVE(&scripts, pp, entry);
-		free(pp);
-	}
-
-	return (0);
-}
-
 static int
-page_print()
+page_print(struct wiki_request *r)
 {
 	struct page_part	*pp;
-	char			*page_title;
-
-	page_title = "blahblah";
 
 	/* Headers */
 	webserver_output(
@@ -191,14 +160,14 @@ page_print()
 "  <head>\n"
 "    <title>%s</title>\n"
 "    <meta content=\"text/html; charset=UTF-8\" "
-"http-equiv=\"Content-Type\" />\n", page_title);
+"http-equiv=\"Content-Type\" />\n", r->requested_page);
 
-	TAILQ_FOREACH(pp, &stylesheets, entry) {
+	TAILQ_FOREACH(pp, &r->stylesheets, entry) {
 		webserver_output("<link href=\"%s\" media=\"all\" rel=\"stylesheet\" "
 		    "type=\"text/css\"/>\n", pp->str);
 	}
 
-	TAILQ_FOREACH(pp, &scripts, entry) {
+	TAILQ_FOREACH(pp, &r->scripts, entry) {
 		webserver_output("<script type=\"text/javascript\" src=\"%s\">"
 		    "</script>\n", pp->str);
 	}
@@ -211,7 +180,7 @@ page_print()
 		webserver_output("<div id=\"header\">%s</div>\n", header);
 
 	webserver_output("  <div id=\"contents\">\n");
-	TAILQ_FOREACH(pp, &page_contents, entry) {
+	TAILQ_FOREACH(pp, &r->page_contents, entry) {
 		webserver_output("%s", pp->str);
 	}
 	webserver_output("  </div>\n");
@@ -226,8 +195,14 @@ page_print()
 }
 
 static int
-page_edit(char *page_data, char *page_name)
+page_edit(struct wiki_request *r, char *page_data)
 {
+	char		*page_name;
+
+	page_name = r->requested_page;
+	if (page_name == NULL)
+		page_name = "_main";
+
 	/* Generate edit-interface */
 
 	/* Headers */
@@ -240,10 +215,10 @@ page_edit(char *page_data, char *page_name)
 "    <meta content=\"text/html; charset=UTF-8\" "
 "http-equiv=\"Content-Type\" />\n", page_name);
 
-	webserver_output("<link href=\"static/admin.css\" media=\"all\" "
+	webserver_output("<link href=\"/static/admin.css\" media=\"all\" "
 	    "rel=\"stylesheet\" type=\"text/css\"/>\n");
 
-	webserver_output("<script type=\"text/javascript\" src=\"js/admin.js\">"
+	webserver_output("<script type=\"text/javascript\" src=\"/static/js/admin.js\">"
 		    "</script>\n");
 
 	webserver_output("  </head>\n"
@@ -283,32 +258,137 @@ page_edit(char *page_data, char *page_name)
 
 }
 
-int
-page_init()
+struct wiki_request *
+wiki_request_new()
 {
-	init_tags();
+	struct wiki_request	*r;
 
-	TAILQ_INIT(&page_contents);
-	TAILQ_INIT(&stylesheets);
-	TAILQ_INIT(&scripts);
+	if ((r = malloc(sizeof *r)) == NULL)
+		return (NULL);
+
+	TAILQ_INIT(&r->page_contents);
+	TAILQ_INIT(&r->stylesheets);
+	TAILQ_INIT(&r->scripts);
+
+	r->requested_page = NULL;
+	r->mime_type = NULL;
+	r->edit = 0;
+	r->data = NULL;
+
+	return (r);
+}
+
+static int
+wiki_request_clear_data(struct wiki_request *r)
+{
+	struct page_part	*pp;
+
+	while(r->page_contents.tqh_first != NULL) {
+		pp = r->page_contents.tqh_first;
+		TAILQ_REMOVE(&r->page_contents, pp, entry);
+		free(pp);
+	}
+
+	while(r->stylesheets.tqh_first != NULL) {
+		pp = r->stylesheets.tqh_first;
+		TAILQ_REMOVE(&r->stylesheets, pp, entry);
+		free(pp);
+	}
+
+	while(r->scripts.tqh_first != NULL) {
+		pp = r->scripts.tqh_first;
+		TAILQ_REMOVE(&r->scripts, pp, entry);
+		free(pp);
+	}
 
 	return (0);
 }
 
 int
-page_serve(char *requested_page, int edit_page)
+wiki_request_clear(struct wiki_request *r)
 {
-	char		*page;
-	int		st;
+	wiki_request_clear_data(r);
 
-	if (edit_page == 0) {
+	r->requested_page = NULL;
+	r->mime_type = NULL;
+	r->edit = 0;
+	r->data = NULL;
+
+	return (0);
+}
+
+int
+wiki_init()
+{
+	init_tags();
+
+	return (0);
+}
+
+int
+wiki_request_serve(struct wiki_request *r)
+{
+	FILE		*fd;
+	char		*page;
+	int		st, nb;
+	char		buf[1024];
+
+	/* Default page */
+	if (r->requested_page == NULL)
+		r->requested_page = "_main";
+
+	/* Handle static content - also, css and images must be
+	 * handled separately
+	 */
+	if (strncmp(r->requested_page, "static/", strlen("static/")) == 0 ||
+	    (r->edit == 0 &&
+	     (strncmp(r->requested_page, "img/", strlen("img/")) == 0 ||
+	     strncmp(r->requested_page, "css/", strlen("css/")) == 0))) {
+	    
+		/* If we can, we should just pass the filename
+		 * to the webserver
+		 *
+		 * Also, all paths should, if possible point
+		 * to a URL that is handled directly by the
+		 * webserver - this is just here for cases
+		 * where the webserver doesn't/can't handle it
+		 * for some reason
+		 */
+		/* FIXME - this is not implemented */
+		//		webserver_output_file(requested_page);
+
+
+		/* FIXME - images can have different MIME-types,
+		 * this should be sent to the webserver.
+		 */
+		// webserver_set_mime_type("text/css");
+		// webserver_set_mime_type("text/plain");
+		// webserver_set_mime_type("text/html");
+		// webserver_set_mime_type("image/png");
+		// webserver_set_mime_type("image/gif");
+		// webserver_set_mime_type("image/jpg");
+		if ((fd = fopen(r->requested_page, "r")) == NULL) {
+			return (-1);
+		}
+
+		while (!feof(fd)) {
+			nb = fread(buf, 1, sizeof buf, fd);
+			if (nb == 0 && ferror(fd))
+				break;
+			webserver_output_buf(buf, nb);
+		}
+		fclose(fd);
+		return (0);
+	}
+
+	if (r->edit == 0) {
 		/* check if any parts of the page has been updated or
 		 * need generating
 		 */
-		st = wiki_stat_page(requested_page);
+		st = wiki_stat_page(r->requested_page);
 		if (st == STAT_PAGE_NO_UPDATES) {
-			fprintf(stderr, "no update, send generated");
-			page = wiki_load_generated(requested_page);
+			DPRINTF("no update, send generated\n");
+			page = wiki_load_generated(r->requested_page);
 			webserver_output("%s", page);
 			free(page);
 			return (0);
@@ -325,10 +405,10 @@ page_serve(char *requested_page, int edit_page)
 		 */
 		page = wiki_load_data("_header");
 		if (page) {
-			page_parse(page, NULL);
-			header = page_get();
+			page_parse(r, page, NULL);
+			header = page_get(r);
 			wiki_save_generated("_header", header);
-			page_clear();
+			wiki_request_clear_data(r);
 			free(page);
 		}
 	} else
@@ -338,27 +418,27 @@ page_serve(char *requested_page, int edit_page)
 		/* Generate footer */
 		page = wiki_load_data("_footer");
 		if (page) {
-			page_parse(page, NULL);
-			footer = page_get();
+			page_parse(r, page, NULL);
+			footer = page_get(r);
 			wiki_save_generated("_footer", footer);
-			page_clear();
+			wiki_request_clear_data(r);
 			free(page);
 		}
 	} else
 		footer = wiki_load_generated("_footer");
 
 	/*strdup_sprintf("%s/css/main.css", static_url);*/
-	stylesheet_add("static/css/main.css");
+	stylesheet_add(r, "/static/css/style.css");
 
-	fprintf(stderr, "loading page %s\n", requested_page);
-	page = wiki_load_data(requested_page);
-	if (edit_page) {
-		fprintf(stderr, "edit page %s\n", requested_page);
-		page_edit(page, requested_page);
+	DPRINTF("loading page %s\n", r->requested_page);
+	page = wiki_load_data(r->requested_page);
+	if (r->edit) {
+		DPRINTF("edit page %s\n", r->requested_page);
+		page_edit(r, page);
 	} else {
-		fprintf(stderr, "parsing page %s\n", requested_page);
-		page_parse(page, NULL);
-		page_print();
+		DPRINTF("parsing page %s\n", r->requested_page);
+		page_parse(r, page, NULL);
+		page_print(r);
 	}
 	free(page);
 
@@ -366,6 +446,59 @@ page_serve(char *requested_page, int edit_page)
 		free(header);
 	if (footer)
 		free(footer);
+	return (0);
+}
+
+static int
+wiki_load_config_fd(FILE *fd)
+{
+	/* fparseln() ... */
+	return (0);
+}
+
+int
+wiki_load_config()
+{
+	FILE		*fd;
+
+	char		*filename_list[] =
+	    { "./codewiki.conf",
+	      "/etc/codewiki.conf",
+	      NULL
+	    };
+	char		*filename, *ptr;
+	int		cnt;
+
+	/* Try the following:
+	 * $CODEWIKI_CONFIG
+	 * ./codewiki.conf
+	 * /etc/codewiki.conf
+	 * or use defaults.
+	 */
+	cnt = 0;
+	filename = NULL;
+	if ((ptr = getenv("CODEWIKI_CONFIG")) != NULL) {
+		filename = ptr;
+	}
+
+	do {
+		if (filename == NULL)
+			filename = filename_list[cnt++];
+
+		if ((fd = fopen(filename, "r")) != NULL) {
+			wiki_load_config_fd(fd);
+			fclose(fd);
+			break;
+		}
+
+		filename = filename_list[cnt++];
+	} while (filename != NULL);
+
+	if (filename == NULL) {
+		config.static_url = "/static";
+		config.base_url = "/wiki";
+	}
+
 	return (0);
 }
 

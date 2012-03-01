@@ -26,12 +26,6 @@
 #include <fcgi_stdio.h>
 #include "codewiki.h"
 
-struct config {
-	char *wiki_url;
-	char *content_path;
-};
-struct config c;
-
 struct cgi_var {
 	LIST_ENTRY(cgi_var)	entry;
 	char			*name;
@@ -41,7 +35,6 @@ LIST_HEAD(cgi_var_list, cgi_var);
 struct cgi_var_list cgi_vars;
 struct cgi_var_list cookie_vars;
 
-#undef printf
 void
 cgi_urldecode(char *data)
 {
@@ -53,7 +46,6 @@ cgi_urldecode(char *data)
 
 	if (data == NULL)
 		return;
-	printf("decoding string %s\n", data);
 
 	len = strlen(data);
 	for (i = 0; i < len; i++) {
@@ -62,12 +54,9 @@ cgi_urldecode(char *data)
 			if (i + 2 > len)
 				return;
 
-			printf("data: %.3s\n", data +i);
 			ptr = data + i + 1;
 			hex[0] = *ptr++;
 			hex[1] = *ptr++;
-
-			printf("hex: %s\n", hex);
 
 			errno = 0;
 			ch = (char)strtol(hex, NULL, 16);
@@ -76,11 +65,8 @@ cgi_urldecode(char *data)
 
 			data[i] = ch;
 
-			printf("Pre_move: %s\n", data);
-
 			/* Move data in our array (including \0) */
 			memmove(data+i+1, data+i+3, len - i - 2);
-			printf("post_move: %s\n", data);
 		} else if (data[i] == '+') {
 			data[i] = ' ';
 		}
@@ -103,8 +89,6 @@ void cgi_split_str(char *str, struct cgi_var_list *list)
 		cv = malloc(sizeof *cv);
 		end_ptr = strchr(ptr, '=');
 		next_ptr = strchr(ptr, '&');
-
-		printf("ptrs: %p, %p, %p\n", ptr, end_ptr, next_ptr);
 
 		if (end_ptr == NULL ||
 		    (next_ptr != NULL && end_ptr > next_ptr)) {
@@ -129,9 +113,6 @@ void cgi_split_str(char *str, struct cgi_var_list *list)
 		if (cv->value)
 			cgi_urldecode(cv->value);
 
-		printf("name: %s\n", cv->name);
-		printf("value: %s\n", cv->value);
-
 		LIST_INSERT_HEAD(list, cv, entry);
 		ptr = next_ptr;
 	}
@@ -140,16 +121,11 @@ void cgi_split_str(char *str, struct cgi_var_list *list)
 int
 cgi_set_vars(char *GET, char *POST, char *COOKIE)
 {
-
-	printf("GET: %s\n", GET);
 	cgi_split_str(GET, &cgi_vars);
-	printf("POST: %s\n", POST);
 	cgi_split_str(POST, &cgi_vars);
-	printf("COOKIE:\n");
 	cgi_split_str(COOKIE, &cookie_vars);
 	return (0);
 }
-#define printf FCGI_printf
 
 int
 cgi_clear_vars()
@@ -221,9 +197,21 @@ cgi_set_cookie(const char *cookie_name, const char *value)
 	printf("Set-Cookie: %s=%s\n\r", cookie_name, value);
 }
 
+int
+webserver_set_mime_type(const char *mime_type)
+{
+	/* Save mime-type for later */
+	/*
+	if (content_type)
+		free(content_type);
+
+	content_type = strdup(mime_type);
+	*/
+	return (0);
+}
 
 int
-webserver_output(char *fmt, ...)
+webserver_output(const char *fmt, ...)
 {
 	va_list ap;
 	int ret;
@@ -232,7 +220,13 @@ webserver_output(char *fmt, ...)
 	ret = vprintf(fmt,ap);
 	va_end(ap);
 
-	return ret;
+	return (ret);
+}
+
+int
+webserver_output_buf(const char *buf, int nb)
+{
+	return fwrite((char *)buf, 1, nb, stdout);
 }
 
 static int
@@ -240,43 +234,59 @@ strcmpsuffix(char *str, char *suffix)
 {
 	int l1, l2;
 
+	if (str == NULL)
+		return (-1);
+
 	l1 = strlen(str);
 	l2 = strlen(suffix);
 
-	if (l1 < l2) return -1;
+	if (l1 < l2)
+		return (-1);
 	return strncmp(str+l1-l2, suffix, l2);
 }
 
 int
 main(int argc, char *argv[], char *envp[])
 {
-	FILE		*fd;
-	char		buf[1024];
-	char		*err_str;
-	char		*requested_page;
-	char		*ptr;
-	int		nb, ret;
-	char		*ticket;
+	struct wiki_request	*r;
+	char			*err_str;
+	char			*requested_page;
+	char			*ptr;
+	int			nb, ret;
+	char			*ticket;
+	int			page_access, edit_page;
 
-	char		*GET, *POST, *COOKIES;
-	int		POST_len;
+	char			*GET, *POST, *COOKIES;
+	int			POST_len;
 
 	GET = NULL;
 	COOKIES = NULL;
 	POST = NULL;
 	POST_len = -1;
 
-	c.wiki_url = "/wiki";
-
 	LIST_INIT(&cgi_vars);
 	LIST_INIT(&cookie_vars);
-	page_init();
+
+	wiki_load_config();
+	wiki_init();
 
 	while ((ret = FCGI_Accept()) >= 0) {
 
 		/* Initialize variables */
 		nb = 0;
 		err_str = NULL;
+		edit_page = 0;
+		r = wiki_request_new();
+
+		requested_page = getenv("PATH_INFO");
+		if (requested_page == NULL) {
+			err_str = "No PATH_INFO supplied. "
+			    "Is your webserver configured correctly?";
+			goto err;
+		}
+		requested_page += strlen(config.base_url);
+		if (*requested_page == '/')
+			requested_page++;
 
 		/* Is this a POST? */
 		ptr = getenv("CONTENT_LENGTH");
@@ -284,25 +294,25 @@ main(int argc, char *argv[], char *envp[])
 			nb = strtol(ptr, NULL, 10);
 
 		if (nb > 0) {
-			nb ++; /* Space for \0 */
 			if (nb > POST_len) {
-				if ((POST = realloc(POST,nb)) == NULL) {
+				if ((POST = realloc(POST,nb+1)) == NULL) {
 					POST_len = -1;
 					goto err;
 				}
 				POST_len = nb;
 			}
 
-			if ((ptr = fgets(POST, nb + 1, stdin)) == NULL)
+			if (fread(POST, 1, nb, stdin)  < nb) {
+				err_str = "Could not read request!";
 				goto err;
+			}
+			POST[nb] = '\0';
 		} else if (POST)
 			POST[0] = '\0';
 
 
 		GET = getenv("QUERY_STRING");
 		cgi_set_vars(GET, POST, COOKIES);
-
-		requested_page = cgi_get("p");
 
 		if (cgi_get_int("login") > 0) {
 			char *user, *password;
@@ -322,8 +332,8 @@ main(int argc, char *argv[], char *envp[])
 			}
 
 			ticket = wiki_ticket_get(user);
+			//cgi_set_cookie("wiki_ticket", ticket);
 			free(ticket);
-//			cgi_set_cookie("wiki_ticket", ticket);
 		} else if (cgi_get_int("logout") > 0) {
 			ticket = cgi_get_cookie("wiki_ticket");
 			wiki_ticket_clear(ticket);
@@ -332,60 +342,39 @@ main(int argc, char *argv[], char *envp[])
 			free(ticket);
 		}
 
+		ticket = cgi_get_cookie("wiki_ticket");
+		page_access = wiki_ticket_access(ticket, requested_page);
+
 		if (cgi_get_int("save") > 0) {
-			int	access;
-
-			ticket = cgi_get_cookie("wiki_ticket");
-			access = wiki_ticket_access(ticket, requested_page);
-
-			if (!(access & WIKI_TICKET_WRITE)) {
+			if (!(page_access & WIKI_TICKET_WRITE)) {
 				err_str = "You don't have enough rights to update this page!";
 				goto err;
 			}
 
 			wiki_save_data(requested_page, cgi_get("wikiText"));
 		}
-
-		//cgi_GET(query_string, "p");
-
-		/* FIXME - check if X-SendFile can be used */
-		if (requested_page &&
-		    (strncmp(requested_page, "css/", strlen("css/")) == 0 ||
-		    strncmp(requested_page, "js/", strlen("js/")) == 0 ||
-		    strncmp(requested_page, "static/", strlen("static/")))
-		    == 0) {
-
-			if (strcmpsuffix(requested_page, ".css") == 0)
-				printf("Content-Type: text/css\r\n\r\n");
+		
+		if (cgi_get_int("edit") > 0) {
+			if (page_access & WIKI_TICKET_WRITE)
+				edit_page = 1;
 			else
-				printf("Content-Type: text/plain\r\n\r\n");
-
-			if ((fd = fopen(requested_page, "r")) == NULL) {
-				FCGI_Finish();
-				continue;
-			}
-
-			while (!feof(fd)) {
-				nb = fread(buf, 1, sizeof buf, fd);
-				if (nb == 0 && ferror(fd))
-					break;
-				fwrite(buf, 1, nb, stdout);
-			}
-			fclose(fd);
-
-			/* Handle js */
-			FCGI_Finish();
-			continue;
+				err_str = "You don't have enough rights to update this page!";
 		}
 
+		if (strcmpsuffix(requested_page, ".css") == 0)
+			printf("Content-Type: text/css\r\n\r\n");
+		else if (strcmpsuffix(requested_page, ".js") == 0)
+			printf("Content-Type: text/plain\r\n\r\n");
+		else
+			printf("Content-Type: text/html\r\n\r\n");
 
-
-		//if ((ptr = strchr(requested_page, '/')))
-			//*ptr = '\0';
-		printf("Content-Type: text/html\r\n\r\n");
 		printf("QUERY_STRING: %s<br>\n", getenv("QUERY_STRING"));
+		printf("PATH_INFO: %s<br>\n", getenv("PATH_INFO"));
 		printf("CONTENT_LENGTH: %d<br>\n", nb);
+		if (err_str)
+			printf("err_str: %s<br>\n", err_str);
 
+		printf("edit_page: %d<br>\n", edit_page);
 		if (POST)
 			printf("POST:%s<br>\n", POST);
 
@@ -397,23 +386,23 @@ main(int argc, char *argv[], char *envp[])
 			printf("<br>\n");
 		}
 
-		if (cgi_get_int("edit") > 0)
-			page_serve(requested_page, 1);
-		else
-			page_serve(requested_page, 0);
+		wiki_request_serve(r);
+
 		FCGI_Finish();
 		cgi_clear_vars();
 
 		/* Cleanup */
-		page_clear();
+		wiki_request_clear(r);
 
 		continue;
 err:
 		printf("Content-Type: text/html\r\n\r\n");
-		fprintf(stdout,"Error processing request\n");
+		printf("Error processing request<br>\n");
+		if (err_str)
+			printf("%s<br>\n", err_str);
 
 		FCGI_Finish();
-		page_clear();
+		wiki_request_clear(r);
 	}
 	fflush(stdout);
 

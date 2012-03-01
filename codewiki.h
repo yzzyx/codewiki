@@ -44,9 +44,9 @@
 #define PTRS_SIZE	100
 
 #ifdef DEBUG
-#define DPRINTF(x,...)		fprintf(stderr,x,...)
+#define DPRINTF(x...)		fprintf(stderr, x)
 #else
-#define DPRINTF(x,...)
+#define DPRINTF(x...)
 #endif
 
 /* Page */
@@ -56,12 +56,25 @@ struct page_part {
 };
 TAILQ_HEAD(page_part_list, page_part);
 
+struct wiki_request {
+	char			*mime_type;
+	char			*data;
+	char			*requested_page;
+	int			edit;
+
+	struct page_part_list	page_contents;
+	struct page_part_list	stylesheets;
+	struct page_part_list	scripts;
+};
+
+
 /* Tags */
 struct tag {
 	char		*name;
 
 	/* Used when generating data */
-	int		(*generate_tag)(struct tag *, char *);
+	int		(*generate_tag)(struct wiki_request *,
+					struct tag *, char *);
 	char		*start_tag;
 	char		*end_tag;
 
@@ -74,10 +87,16 @@ struct tag {
 RB_HEAD(tag_list, tag);
 RB_PROTOTYPE(tag_list, tag, entry, tags_rb_cmp);
 
-struct tag *find_tag(char *);
+struct tag *find_tag(struct wiki_request *, char *);
 void init_tags();
 
 /* Backend */
+struct config {
+	char		*static_url;
+	char		*base_url;
+};
+extern struct config config;
+
 #define STAT_PAGE_NO_UPDATES		(0)
 #define STAT_PAGE_UPDATED_PAGE		(1)
 #define STAT_PAGE_UPDATED_HEADER	(2)
@@ -101,23 +120,22 @@ char *wiki_ticket_get(const char *);
 int wiki_ticket_access(const char *, const char *);
 int wiki_ticket_clear(const char *);
 
-
 /* functions not yet implemented:
 int wiki_save_data(const char *, const char *);
-
 int wiki_list_revisions(const char *, struct revision *);
 char *wiki_load_revision(const char *, struct revision *)
 */
 
 
 /* Common */
-int stylesheet_add(char *);
-int script_add(char *);
+int stylesheet_add(struct wiki_request *r, char *file);
+int script_add(struct wiki_request *r, char *file);
 
-int page_init();
-int page_serve(char *, int);
-int page_clear();
-int page_cleanup();
+int wiki_init();
+int wiki_load_config();
+struct wiki_request *wiki_request_new();
+int wiki_request_serve(struct wiki_request *);
+int wiki_request_clear(struct wiki_request *);
 
 /* Differs between CGI-implementations */
 int webserver_output(const char *, ...);
