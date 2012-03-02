@@ -45,9 +45,7 @@ struct tag static_tags[] =
 	{"==", generate_tag_header },
 	{"{{", generate_tag_image },
 	{"<code", generate_tag_code },
-	/*
 	{"<<", generate_tag_inline_code },
-	*/
 	{NULL, NULL}
 };
 
@@ -210,6 +208,11 @@ generate_tag_link(struct wiki_request *r, struct tag *t, char *ptr)
 	else
 		*label++ = '\0';
 
+	/* Special links */
+	if (strcmp(link, "_edit") == 0) {
+		link = "?edit=1";
+	}
+
 	/* FIXME -
 	 * keep track of allocated data - we want to free it
 	 * when we're done with it
@@ -259,7 +262,7 @@ generate_tag_image(struct wiki_request *r, struct tag *t, char *ptr)
 	    strncmp(src, "https://", 8) == 0)
 		format = "<img src=\"%s\" alt=\"%s\" />";
 	else
-		format = "<img src=\"images/%s\" alt=\"%s\" />";
+		format = "<img src=\"img/%s\" alt=\"%s\" />";
 
 	/* FIXME -
 	 * keep track of allocated data - we want to free it
@@ -375,6 +378,27 @@ generate_tag_code(struct wiki_request *r, struct tag *t, char *ptr)
 	else
 		t->skip_ptr = t->end_ptr + strlen("</code>");
 	t->parse = 0;
+	return (1);
+}
+
+int
+generate_tag_inline_code(struct wiki_request *r, struct tag *t, char *ptr)
+{
+	t->start_tag = "<code>";
+	t->end_tag = "</code>";
+
+	/* Anything within our tag * should be parsed */
+	t->start_ptr = ptr + 2; /* strlen(">>"); */
+	t->end_ptr = ptr + 2;
+	for (; *t->end_ptr && strncmp(t->end_ptr, ">>", 2) != 0;
+			t->end_ptr ++);
+
+	/* Make sure that we don't print or parse the end-marker */
+	t->skip_ptr = t->end_ptr;
+	if (*t->end_ptr)
+		t->skip_ptr += 2;
+	t->parse = 1; /* parse contents */
+
 	return (1);
 }
 
