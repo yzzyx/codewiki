@@ -1,5 +1,5 @@
-
-CFLAGS+=-Wall -ggdb3
+CFLAGS+=-Wall -ggdb3 -DDEBUG
+LDFLAGS+=-lcrypt
 SRCS=$(shell ls *.c)
 OBJS=file.o tags.o codewiki.o
 DEPS= $(addsuffix .depend, $(OBJS))

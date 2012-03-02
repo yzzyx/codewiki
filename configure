@@ -2,7 +2,8 @@
 
 checkHeader()
 {
-	HEADER=$1
+	CONFIG_FLAG=$1
+	HEADER=$2
 	TMP=`tempfile --suffix .c`
 	echo -n "Checking for $HEADER "
 	cat > $TMP << EOF
@@ -13,36 +14,24 @@ EOF
 	$CC -o $TMP.o -c $TMP > /dev/null 2>&1
 	if [ $? -eq 0 ]; then
 		echo "[yes]"
+		echo "#define $CONFIG_FLAG 1" >> config.h
 		return 1
 	else
 		echo "[no]"
+		echo "#define $CONFIG_FLAG 0" >> config.h
 		return 0
 	fi
 
 	rm $TMP
 }
 
-checkHeader "fcgi_stdio.h"
-HAVE_FCGI_H=$?
-checkHeader "queue.h"
-HAVE_QUEUE_H=$?
-checkHeader "sys/queue.h"
-HAVE_SYS_QUEUE_H=$?
-checkHeader "bsd/queue.h"
-HAVE_BSD_QUEUE_H=$?
-checkHeader "sys/tree.h"
-HAVE_TREE_H=$?
-checkHeader "bsd/sys/tree.h"
-HAVE_BSD_TREE_H=$?
-
-cat > config.h << EOF
-#define HAVE_FCGI_H $HAVE_FCGI_H
-#define HAVE_QUEUE_H $HAVE_QUEUE_H
-#define HAVE_SYS_QUEUE_H $HAVE_SYS_QUEUE_H
-#define HAVE_BSD_QUEUE_H $HAVE_BSD_QUEUE_H
-#define HAVE_TREE_H $HAVE_TREE_H
-#define HAVE_BSD_TREE_H $HAVE_BSD_TREE_H
-EOF
+checkHeader HAVE_FCGI_H		"fcgi_stdio.h"
+checkHeader HAVE_QUEUE_H	"queue.h"
+checkHeader HAVE_SYS_QUEUE_H	"sys/queue.h"
+checkHeader HAVE_BSD_QUEUE_H	"bsd/queue.h"
+checkHeader HAVE_TREE_H		"sys/tree.h"
+checkHeader HAVE_BSD_TREE_H	"bsd/sys/tree.h"
+checkHeader HAVE_CRYPT_H	"crypt.h"
 
 #TODO -> fix Makefile, only try to compile the versions we can actually
 # build
