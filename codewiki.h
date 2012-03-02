@@ -113,6 +113,7 @@ char *wiki_load_generated(const char *);
 int wiki_load_data(const char *page, char **result);
 int wiki_save_data(const char *, const char *);
 int wiki_save_generated(const char *, const char *);
+int wiki_list_history(const char *page, struct page_part_list *list);
 
 #define WIKI_LOGIN_OK			(0)
 #define WIKI_LOGIN_WRONG_PASSWORD	(1)

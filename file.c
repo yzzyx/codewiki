@@ -1,5 +1,10 @@
+#include <sys/types.h>
 #include <sys/stat.h>
+#include <dirent.h>
+#include <unistd.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <ctype.h>
 #include <limits.h>
 #include <malloc.h>
 #include <string.h>
@@ -162,4 +167,67 @@ wiki_load_data(const char *page, char **result)
 
 	DPRINTF("reading file %s\n", filename);
 	return file_get_contents(filename, result);
+}
+
+int
+wiki_list_history(const char *page, struct page_part_list *list)
+{
+	DIR			*d;
+	struct dirent		*entry;
+	struct dirent		*ptr;
+	char			path[PATH_MAX];
+	int			cnt, len;
+	struct page_part	*pp;
+	int			i;
+
+	snprintf(path, sizeof path, "%s/%s/",
+	    CONTENTS_DIR, page);
+
+	cnt = 0;
+	TAILQ_INIT(list);
+
+	DPRINTF("Listing history in %s\n", path);
+	d = opendir(path);
+	if (d == NULL)
+		return (0);
+
+	len = offsetof(struct dirent, d_name) +
+		     pathconf(path, _PC_NAME_MAX) + 1;
+	entry = malloc(len);
+
+	if (entry == NULL) {
+		closedir(d);
+		return (0);
+	}
+
+	for (;;) {
+		if (readdir_r(d, entry, &ptr) != 0)
+			break;
+		if (ptr == NULL)
+			break;
+
+		DPRINTF("File: %s\n", entry->d_name);
+		/* Skip hidden files and '.' and '..' */
+		if (entry->d_name[0] == '.')
+			continue;
+
+		/* Only look at files */
+		if ((entry->d_type & DT_REG) == 0)
+			continue;
+
+		/* Only look for all-number filenames */
+		for (i = 0; isdigit(entry->d_name[i]); i++);
+		if (entry->d_name[i] != '\0')
+			continue;
+
+		DPRINTF("Adding to list\n");
+		pp = malloc(sizeof *pp);
+		pp->str = (char *)strtol(entry->d_name, NULL, 10);
+		TAILQ_INSERT_TAIL(list, pp, entry);
+
+		cnt ++;
+	}
+
+	closedir(d);
+	return (cnt);
 }

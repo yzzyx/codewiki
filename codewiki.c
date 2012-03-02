@@ -73,6 +73,19 @@ strcmpsuffix(const char *str, const char *suffix)
 	return strncmp(str+l1-l2, suffix, l2);
 }
 
+static int
+pp_list_free(struct page_part_list *ppl)
+{
+	struct page_part *pp;
+
+	while(ppl->tqh_first != NULL) {
+		pp = ppl->tqh_first;
+		TAILQ_REMOVE(ppl, pp, entry);
+		free(pp);
+	}
+	return (0);
+}
+
 int
 stylesheet_add(struct wiki_request *r, char *file)
 {
@@ -243,7 +256,12 @@ page_print(struct wiki_request *r)
 static int
 page_edit(struct wiki_request *r, char *page_data)
 {
-	char		*page_name;
+	struct page_part_list	history;
+	struct page_part	*pp;
+	struct tm		tm_s;
+	time_t			timestamp;
+	char			timestamp_str[30];
+	char			*page_name;
 
 	page_name = r->requested_page;
 	if (page_name == NULL)
@@ -277,6 +295,28 @@ page_edit(struct wiki_request *r, char *page_data)
 	if (header != NULL)
 		webserver_output(r, "<div id=\"header\">%s</div>\n", header);
 
+	webserver_output(r, "<div id=\"history_container\">\n"
+	    "<h2>History:</h2>\n"
+	    "<ul id=\"history\">\n");
+
+	wiki_list_history(r->requested_page, &history);
+
+	TAILQ_FOREACH(pp, &history, entry) {
+		timestamp = (time_t)(pp->str);
+		DPRINTF("timestamp: %ld\n", timestamp);
+
+		if (localtime_r(&timestamp, &tm_s) == NULL)
+			continue;
+
+		if (strftime(timestamp_str, sizeof (timestamp_str),
+		    "%Y-%m-%d %H:%M", &tm_s) == 0)
+			continue;
+		webserver_output(r, "<li><a href=\"?edit=1&history=%ld\">%s</a></li>",
+		    timestamp, timestamp_str);
+	}
+	pp_list_free(&history);
+	webserver_output(r, "</ul>\n</div>\n");
+
 	webserver_output(r, "<form method=\"POST\" action=\"?\">\n"
 	    "<input type=\"hidden\" name=\"p\" value=\"%s\" />\n"
 	    "<input type=\"hidden\" name=\"time\" value=\"%ld\" />\n"
@@ -303,9 +343,11 @@ page_edit(struct wiki_request *r, char *page_data)
 		webserver_output(r, "</textarea>");
 	}
 
+
 	webserver_output(r, "<input type=\"submit\" value=\"Save\" />\n"
 	    "</div>\n"
 	    "</form>\n");
+
 
 	if (footer != NULL)
 		webserver_output(r, "<div id=\"footer\">%s</div>\n", footer);
@@ -338,28 +380,13 @@ wiki_request_new()
 	return (r);
 }
 
+
 static int
 wiki_request_clear_data(struct wiki_request *r)
 {
-	struct page_part	*pp;
-
-	while(r->page_contents.tqh_first != NULL) {
-		pp = r->page_contents.tqh_first;
-		TAILQ_REMOVE(&r->page_contents, pp, entry);
-		free(pp);
-	}
-
-	while(r->stylesheets.tqh_first != NULL) {
-		pp = r->stylesheets.tqh_first;
-		TAILQ_REMOVE(&r->stylesheets, pp, entry);
-		free(pp);
-	}
-
-	while(r->scripts.tqh_first != NULL) {
-		pp = r->scripts.tqh_first;
-		TAILQ_REMOVE(&r->scripts, pp, entry);
-		free(pp);
-	}
+	pp_list_free(&r->page_contents);
+	pp_list_free(&r->stylesheets);
+	pp_list_free(&r->scripts);
 
 	return (0);
 }
@@ -746,5 +773,15 @@ wiki_ticket_access(const char *ticket, const char *page)
 int
 wiki_ticket_clear(const char *ticket)
 {
+	struct ticket	search;
+	struct ticket	*t;
+
+	search.ticket = (char *)ticket;
+	t = RB_FIND(ticket_list, &tickets, &search);
+
+	free(t->ticket);
+	free(t->user);
+
+	RB_REMOVE(ticket_list, &tickets, t);
 	return (0);
 }
