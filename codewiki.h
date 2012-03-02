@@ -56,8 +56,15 @@ struct page_part {
 };
 TAILQ_HEAD(page_part_list, page_part);
 
+#define WIKI_PAGE_TYPE_HTML	(0)
+#define WIKI_PAGE_TYPE_CSS	(1)
+#define WIKI_PAGE_TYPE_JS	(2)
+#define WIKI_PAGE_TYPE_IMAGE	(3)
+#define WIKI_PAGE_TYPE_STATIC	(4)
+
 struct wiki_request {
 	char			*mime_type;
+	int			page_type;
 	char			*data;
 	char			*requested_page;
 	int			edit;
@@ -103,7 +110,7 @@ extern struct config config;
 #define STAT_PAGE_UPDATED_FOOTER	(3)
 int wiki_stat_page(const char *);
 char *wiki_load_generated(const char *);
-char *wiki_load_data(const char *);
+int wiki_load_data(const char *page, char **result);
 int wiki_save_data(const char *, const char *);
 int wiki_save_generated(const char *, const char *);
 
@@ -128,6 +135,7 @@ char *wiki_load_revision(const char *, struct revision *)
 
 
 /* Common */
+int strcmpsuffix(const char *, const char *);
 int stylesheet_add(struct wiki_request *r, char *file);
 int script_add(struct wiki_request *r, char *file);
 
@@ -138,6 +146,6 @@ int wiki_request_serve(struct wiki_request *);
 int wiki_request_clear(struct wiki_request *);
 
 /* Differs between CGI-implementations */
-int webserver_output(const char *, ...);
-int webserver_output_buf(const char *, int);
+int webserver_output(struct wiki_request *r, const char *, ...);
+int webserver_output_buf(struct wiki_request *r, const char *, int);
 #endif

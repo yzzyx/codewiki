@@ -6,20 +6,21 @@
 #include <errno.h>
 #include "codewiki.h"
 
-static char *
-file_get_contents(char *filename)
+static int
+file_get_contents(const char *filename, char **result)
 {
 	FILE		*fd;
 	char		*contents;
 	char		*ptr;
 	size_t		nb, tot_nb;
 
+	*result = NULL;
 	if ((fd = fopen(filename, "r")) == NULL)
-		return NULL;
+		return (-1);
 
 	if ((contents = malloc(BUF_SIZE)) == NULL) {
 		fclose(fd);
-		return NULL;
+		return (-1);
 	}
 
 	nb = 0;
@@ -30,23 +31,25 @@ file_get_contents(char *filename)
 		if (ferror(fd)) {
 			free(contents);
 			fclose(fd);
-			return (NULL);
+			return (-1);
 		}
 
-
-		if (nb < BUF_SIZE) break;
 		tot_nb += nb;
+		if (nb < BUF_SIZE) break;
+
 		contents = realloc(contents, tot_nb + BUF_SIZE);
 		if (contents == NULL) {
 			fclose(fd);
-			return (NULL);
+			return (-1);
 		}
 		ptr = contents + tot_nb;
 	}
-	ptr[nb] = '\0';
+	ptr[tot_nb] = '\0';
 
 	fclose(fd);
-	return contents;
+
+	*result = contents;
+	return tot_nb;
 }
 
 static int
@@ -118,10 +121,14 @@ char *
 wiki_load_generated(const char *page)
 {
 	char		filename[PATH_MAX];
+	char		*result;
 
 	snprintf(filename, sizeof filename, "%s/%s/generated.html",
 	    CONTENTS_DIR, page);
-	return file_get_contents(filename);
+
+	file_get_contents(filename, &result);
+
+	return (result);
 }
 
 int
@@ -131,25 +138,28 @@ wiki_save_data(const char *page, const char *data)
 	char		new_file[PATH_MAX];
 	struct stat	st;
 
-	snprintf(filename, sizeof filename, "%s/%s/latest.txt",
+	snprintf(filename, sizeof filename, "%s/%s/latest",
 	    CONTENTS_DIR, page);
 
 	stat(filename, &st);
-	snprintf(new_file, sizeof new_file, "%s/%s/%ld.txt",
+	snprintf(new_file, sizeof new_file, "%s/%s/%ld",
 	    CONTENTS_DIR, page, st.st_mtime);
 
 	/* FIXME - check if file exists already */
 	rename(filename, new_file);
 
+	DPRINTF("saving file %s\n", filename);
 	return file_set_contents(filename, data);
 }
 
-char *
-wiki_load_data(const char *page)
+int
+wiki_load_data(const char *page, char **result)
 {
 	char		filename[PATH_MAX];
 
-	snprintf(filename, sizeof filename, "%s/%s/latest.txt",
+	snprintf(filename, sizeof filename, "%s/%s/latest",
 	    CONTENTS_DIR, page);
-	return file_get_contents(filename);
+
+	DPRINTF("reading file %s\n", filename);
+	return file_get_contents(filename, result);
 }

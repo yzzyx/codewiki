@@ -17,16 +17,61 @@
 */
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <limits.h>
 #include <string.h>
 #include <malloc.h>
+#include <ctype.h>
 #include <time.h>
 #include "codewiki.h"
+
+#ifdef HAVE_CRYPT_H
+#include <crypt.h>
+#endif
+
+#define TICKET_SIZE 20
+#define TICKET_VALID_CHARS "abcdefghijklmnopqrstuvwxyz" \
+			   "ABCDEFGHIJKLMNOPQRSTUVWXYZ" \
+			   ".:-_()[]"
+
+struct ticket {
+	char			*ticket;
+	char			*user;
+	int			access;
+	RB_ENTRY(ticket)	entry;
+};
+RB_HEAD(ticket_list, ticket);
+RB_PROTOTYPE(ticket_list, ticket, entry, ticket_rb_cmp);
+
+struct ticket_list tickets;
+
+int
+ticket_rb_cmp(struct ticket *a, struct ticket *b)
+{
+	return strcmp(a->ticket, b->ticket);
+}
+RB_GENERATE(ticket_list, ticket, entry, ticket_rb_cmp);
 
 struct config config;
 
 char *header = NULL;
 char *footer = NULL;
+
+int
+strcmpsuffix(const char *str, const char *suffix)
+{
+	int l1, l2;
+
+	if (str == NULL)
+		return (-1);
+
+	l1 = strlen(str);
+	l2 = strlen(suffix);
+
+	if (l1 < l2)
+		return (-1);
+	return strncmp(str+l1-l2, suffix, l2);
+}
 
 int
 stylesheet_add(struct wiki_request *r, char *file)
@@ -153,7 +198,7 @@ page_print(struct wiki_request *r)
 	struct page_part	*pp;
 
 	/* Headers */
-	webserver_output(
+	webserver_output(r,
 "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \n"
 "\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">\n"
 "<html>\n"
@@ -163,31 +208,32 @@ page_print(struct wiki_request *r)
 "http-equiv=\"Content-Type\" />\n", r->requested_page);
 
 	TAILQ_FOREACH(pp, &r->stylesheets, entry) {
-		webserver_output("<link href=\"%s\" media=\"all\" rel=\"stylesheet\" "
+		webserver_output(r, "<link href=\"%s\" media=\"all\" rel=\"stylesheet\" "
 		    "type=\"text/css\"/>\n", pp->str);
 	}
 
 	TAILQ_FOREACH(pp, &r->scripts, entry) {
-		webserver_output("<script type=\"text/javascript\" src=\"%s\">"
+		webserver_output(r,
+		    "<script type=\"text/javascript\" src=\"%s\">"
 		    "</script>\n", pp->str);
 	}
 
-	webserver_output("  </head>\n"
+	webserver_output(r, "  </head>\n"
 	    "<body onload=\"sh_highlightDocument();\">\n"
 	    "<div id=\"body\">\n");
 
 	if (header != NULL)
-		webserver_output("<div id=\"header\">%s</div>\n", header);
+		webserver_output(r, "<div id=\"header\">%s</div>\n", header);
 
-	webserver_output("  <div id=\"contents\">\n");
+	webserver_output(r, "  <div id=\"contents\">\n");
 	TAILQ_FOREACH(pp, &r->page_contents, entry) {
-		webserver_output("%s", pp->str);
+		webserver_output(r, "%s", pp->str);
 	}
-	webserver_output("  </div>\n");
+	webserver_output(r, "  </div>\n");
 	if (footer != NULL)
-		webserver_output("<div id=\"footer\">%s</div>\n", footer);
+		webserver_output(r, "<div id=\"footer\">%s</div>\n", footer);
 
-	webserver_output("</div>\n"
+	webserver_output(r, "</div>\n"
 	    "</body>\n"
 	    "</html>\n");
 
@@ -206,7 +252,7 @@ page_edit(struct wiki_request *r, char *page_data)
 	/* Generate edit-interface */
 
 	/* Headers */
-	webserver_output(
+	webserver_output(r,
 "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \n"
 "\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">\n"
 "<html>\n"
@@ -215,42 +261,56 @@ page_edit(struct wiki_request *r, char *page_data)
 "    <meta content=\"text/html; charset=UTF-8\" "
 "http-equiv=\"Content-Type\" />\n", page_name);
 
-	webserver_output("<link href=\"/static/admin.css\" media=\"all\" "
+	webserver_output(r,
+	    "<link href=\"/static/css/admin.css\" media=\"all\" "
 	    "rel=\"stylesheet\" type=\"text/css\"/>\n");
 
-	webserver_output("<script type=\"text/javascript\" src=\"/static/js/admin.js\">"
+	webserver_output(r,
+	    "<script type=\"text/javascript\" src=\"/static/js/admin.js\">"
 		    "</script>\n");
 
-	webserver_output("  </head>\n"
+	webserver_output(r,
+	    "  </head>\n"
 	    "<body>\n"
 	    "<div id=\"body\">\n");
 
 	if (header != NULL)
-		webserver_output("<div id=\"header\">%s</div>\n", header);
+		webserver_output(r, "<div id=\"header\">%s</div>\n", header);
 
-	webserver_output("<form method=\"POST\" action=\"?\">\n"
+	webserver_output(r, "<form method=\"POST\" action=\"?\">\n"
 	    "<input type=\"hidden\" name=\"p\" value=\"%s\" />\n"
 	    "<input type=\"hidden\" name=\"time\" value=\"%ld\" />\n"
 	    "<input type=\"hidden\" name=\"save\" value=\"1\" />\n",
 	    page_name, time(NULL));
-	webserver_output("<div id=\"contents\">\n"
-	    "<h2>Editing page %s</h2>\n"
-	    "<textarea id=\"wikiText\" name=\"wikiText\" tabindex=\"1\">\n",
-	    page_name);
 
-	if (page_data != NULL)
-		webserver_output("%s", page_data);
+	if (r->page_type == WIKI_PAGE_TYPE_IMAGE) {
+		webserver_output(r, "<div id=\"contents\">\n"
+			"<h2>Editing image %s</h2>\n"
+			"Current image:<br />\n"
+			"<img id=\"wikiImage\" src=\"%s/%s\" /><br />"
+			"New image:<br />\n"
+			"<input type=\"file\" name=\"wikiData\"><br />",
+			page_name, config.base_url, r->requested_page);
+	} else { /* HTML and CSS */
+		webserver_output(r, "<div id=\"contents\">\n"
+		    "<h2>Editing page %s</h2>\n"
+		    "<textarea id=\"wikiText\" name=\"wikiData\" "
+				"tabindex=\"1\">\n", page_name);
 
-	webserver_output("</textarea>");
+		if (page_data != NULL)
+			webserver_output(r, "%s", page_data);
 
-	webserver_output("<input type=\"submit\" value=\"Save\" />\n"
+		webserver_output(r, "</textarea>");
+	}
+
+	webserver_output(r, "<input type=\"submit\" value=\"Save\" />\n"
 	    "</div>\n"
 	    "</form>\n");
 
 	if (footer != NULL)
-		webserver_output("<div id=\"footer\">%s</div>\n", footer);
+		webserver_output(r, "<div id=\"footer\">%s</div>\n", footer);
 
-	webserver_output("</div>\n"
+	webserver_output(r, "</div>\n"
 	    "</body>\n"
 	    "</html>\n");
 
@@ -321,8 +381,58 @@ int
 wiki_init()
 {
 	init_tags();
+	RB_INIT(&tickets);
 
 	return (0);
+}
+
+static void
+wiki_set_mime_type(struct wiki_request *r)
+{
+
+	if (r->page_type == WIKI_PAGE_TYPE_HTML)
+		r->mime_type = "text/html";
+	else if (r->page_type == WIKI_PAGE_TYPE_CSS)
+		r->mime_type = "text/css";
+	else if (r->page_type == WIKI_PAGE_TYPE_JS)
+		r->mime_type = "text/javascript";
+	else if (strcmpsuffix(r->requested_page, ".png") == 0)
+		r->mime_type = "image/png";
+	else if (strcmpsuffix(r->requested_page, ".gif") == 0)
+		r->mime_type = "image/gif";
+	else if (strcmpsuffix(r->requested_page, ".jpg") == 0)
+		r->mime_type = "image/jpeg";
+	else if (strcmpsuffix(r->requested_page, ".jpeg") == 0)
+		r->mime_type = "image/jpeg";
+	/* The values below actually only apply to static pages */
+	else if (strcmpsuffix(r->requested_page, ".txt") == 0)
+		r->mime_type = "text/plain";
+	else if (strcmpsuffix(r->requested_page, ".html") == 0)
+		r->mime_type = "text/html";
+	else if (strcmpsuffix(r->requested_page, ".css") == 0)
+		r->mime_type = "text/css";
+	else if (strcmpsuffix(r->requested_page, ".js") == 0)
+		r->mime_type = "text/javascript";
+	else
+		r->mime_type = "text/html";
+}
+
+static void
+wiki_set_page_type(struct wiki_request *r)
+{
+
+	if (r->requested_page == NULL)
+		r->page_type = WIKI_PAGE_TYPE_HTML;
+	else if(strncmp(r->requested_page, "css/", strlen("css/")) == 0)
+		r->page_type = WIKI_PAGE_TYPE_CSS;
+	else if(strncmp(r->requested_page, "js/", strlen("js/")) == 0)
+		r->page_type = WIKI_PAGE_TYPE_JS;
+	else if(strncmp(r->requested_page, "img/", strlen("img/")) == 0)
+		r->page_type = WIKI_PAGE_TYPE_IMAGE;
+	else if(strncmp(r->requested_page, "static/", strlen("static/")) == 0)
+		r->page_type = WIKI_PAGE_TYPE_STATIC;
+	else
+		r->page_type = WIKI_PAGE_TYPE_HTML;
 }
 
 int
@@ -333,6 +443,8 @@ wiki_request_serve(struct wiki_request *r)
 	int		st, nb;
 	char		buf[1024];
 
+	DPRINTF("requested_page: %s\n", r->requested_page);
+
 	/* Default page */
 	if (r->requested_page == NULL)
 		r->requested_page = "_main";
@@ -340,11 +452,15 @@ wiki_request_serve(struct wiki_request *r)
 	/* Handle static content - also, css and images must be
 	 * handled separately
 	 */
-	if (strncmp(r->requested_page, "static/", strlen("static/")) == 0 ||
-	    (r->edit == 0 &&
-	     (strncmp(r->requested_page, "img/", strlen("img/")) == 0 ||
-	     strncmp(r->requested_page, "css/", strlen("css/")) == 0))) {
-	    
+	wiki_set_page_type(r);
+	if (r->edit) {
+		r->mime_type = "text/html";
+	} else {
+		wiki_set_mime_type(r);
+	}
+
+	DPRINTF("page_type: %d\n", r->page_type);
+	if (r->page_type == WIKI_PAGE_TYPE_STATIC) {
 		/* If we can, we should just pass the filename
 		 * to the webserver
 		 *
@@ -356,17 +472,6 @@ wiki_request_serve(struct wiki_request *r)
 		 */
 		/* FIXME - this is not implemented */
 		//		webserver_output_file(requested_page);
-
-
-		/* FIXME - images can have different MIME-types,
-		 * this should be sent to the webserver.
-		 */
-		// webserver_set_mime_type("text/css");
-		// webserver_set_mime_type("text/plain");
-		// webserver_set_mime_type("text/html");
-		// webserver_set_mime_type("image/png");
-		// webserver_set_mime_type("image/gif");
-		// webserver_set_mime_type("image/jpg");
 		if ((fd = fopen(r->requested_page, "r")) == NULL) {
 			return (-1);
 		}
@@ -375,13 +480,25 @@ wiki_request_serve(struct wiki_request *r)
 			nb = fread(buf, 1, sizeof buf, fd);
 			if (nb == 0 && ferror(fd))
 				break;
-			webserver_output_buf(buf, nb);
+			webserver_output_buf(r, buf, nb);
 		}
 		fclose(fd);
 		return (0);
 	}
 
+	st = STAT_PAGE_NO_UPDATES;
 	if (r->edit == 0) {
+		/* Images and CSS should be sent right away */
+		if (r->page_type == WIKI_PAGE_TYPE_IMAGE ||
+		    r->page_type == WIKI_PAGE_TYPE_CSS) {
+			/* FIXME - use X-Sendfile if possible */
+			nb = wiki_load_data(r->requested_page, &page);
+			webserver_output_buf(r, page, nb);
+			free(page);
+
+			return (0);
+		}
+
 		/* check if any parts of the page has been updated or
 		 * need generating
 		 */
@@ -389,7 +506,7 @@ wiki_request_serve(struct wiki_request *r)
 		if (st == STAT_PAGE_NO_UPDATES) {
 			DPRINTF("no update, send generated\n");
 			page = wiki_load_generated(r->requested_page);
-			webserver_output("%s", page);
+			webserver_output(r, "%s", page);
 			free(page);
 			return (0);
 		}
@@ -403,7 +520,7 @@ wiki_request_serve(struct wiki_request *r)
 		/* FIXME - use some kind of lock on
 		 * generated.html
 		 */
-		page = wiki_load_data("_header");
+		wiki_load_data("_header", &page);
 		if (page) {
 			page_parse(r, page, NULL);
 			header = page_get(r);
@@ -416,7 +533,7 @@ wiki_request_serve(struct wiki_request *r)
 
 	if (st & STAT_PAGE_UPDATED_FOOTER) {
 		/* Generate footer */
-		page = wiki_load_data("_footer");
+		wiki_load_data("_footer", &page);
 		if (page) {
 			page_parse(r, page, NULL);
 			footer = page_get(r);
@@ -431,7 +548,10 @@ wiki_request_serve(struct wiki_request *r)
 	stylesheet_add(r, "/static/css/style.css");
 
 	DPRINTF("loading page %s\n", r->requested_page);
-	page = wiki_load_data(r->requested_page);
+
+	if (r->page_type != WIKI_PAGE_TYPE_IMAGE)
+		wiki_load_data(r->requested_page, &page);
+
 	if (r->edit) {
 		DPRINTF("edit page %s\n", r->requested_page);
 		page_edit(r, page);
@@ -502,24 +622,125 @@ wiki_load_config()
 	return (0);
 }
 
+static int
+wiki_ticket_set(const char *username, int access)
+{
+	struct ticket	*new;
+	char		*key;
+	int		i;
+
+	/* FIXME - check if we already have it */
+	new = malloc(sizeof *new);
+	key = malloc(TICKET_SIZE+1);
+	for(i=0;i<TICKET_SIZE;i++)
+		key[i] = TICKET_VALID_CHARS[rand() %
+			     sizeof(TICKET_VALID_CHARS)];
+	key[i] = '\0';
+
+	new->ticket = key;
+	new->user = strdup(username);
+	new->access = access;
+	DPRINTF("Adding key '%s' for user %s\n", new->ticket, new->user);
+
+	RB_INSERT(ticket_list, &tickets, new);
+
+	return (0);
+}
+
 int
 wiki_login(const char *username, const char *password)
 {
-	/* FIXME - check wiki-passwdfile */
-	return WIKI_LOGIN_OK;
+	FILE		*fd;
+	char		*buf;
+	char		*ptr, *saveptr;
+	int		ret;
+
+	char		*p_usr,
+			*p_passwd;
+	char		*enc_passwd;
+
+	if ((buf = malloc(50)) == NULL)
+		return (WIKI_LOGIN_ERROR);
+
+	if ((fd = fopen("passwd","r")) == NULL) {
+		free(buf);
+		return (WIKI_LOGIN_WRONG_PASSWORD);
+	}
+
+	ret = WIKI_LOGIN_WRONG_PASSWORD;
+	while (!feof(fd)) {
+		fgets(buf, 50, fd);
+		ptr = buf;
+		while (isspace(*ptr)) ptr++;
+
+		if (*ptr == '#')
+			continue;
+
+		DPRINTF("passwd entry: %s", ptr);
+
+		saveptr = NULL;
+		p_usr = strtok_r(ptr, ":", &saveptr);
+		if (strcmp(p_usr, username) != 0)
+			continue;
+		p_passwd = strtok_r(NULL, ":", &saveptr);
+
+		DPRINTF("passwd password: %s\n", p_passwd);
+		/*
+		p_write = strtok_r(NULL, ":", &saveptr);
+		p_wspec = strtok_r(NULL, ":", &saveptr);
+		*/
+
+		if (p_passwd == NULL)
+			continue;
+
+		enc_passwd = crypt(password, p_passwd);
+		DPRINTF("supplied: %s\n", enc_passwd);
+
+		if (strcmp(enc_passwd, p_passwd) != 0)
+			continue;
+
+		DPRINTF("Login ok!\n");
+		wiki_ticket_set(username, WIKI_TICKET_READ |
+		    WIKI_TICKET_WRITE);
+
+		ret = WIKI_LOGIN_OK;
+		break;
+	}
+
+	free(buf);
+	return (ret);
 }
 
 char *
 wiki_ticket_get(const char *username)
 {
-	/* FIXME - get value from wiki-passwdfile */
-	return strdup("ABCDEFGHIJKLMN=)SASAFJKSF");
+	struct ticket	*t;
+
+	RB_FOREACH(t, ticket_list, &tickets) {
+		if (strcmp(t->user, username) == 0)
+			return t->ticket;
+	}
+
+	return (NULL);
 }
 
 int
 wiki_ticket_access(const char *ticket, const char *page)
 {
-	return WIKI_TICKET_READ | WIKI_TICKET_WRITE;
+	struct ticket	search;
+	struct ticket	*t;
+
+	if (ticket == NULL)
+		return (WIKI_TICKET_READ);
+
+	search.ticket = (char *)ticket;
+	t = RB_FIND(ticket_list, &tickets, &search);
+
+	if (!t)
+		return (WIKI_TICKET_READ);
+
+	DPRINTF("User '%s' has ticket - access %d\n", t->user, t->access);
+	return (t->access);
 }
 
 int
