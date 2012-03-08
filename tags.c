@@ -234,6 +234,7 @@ generate_tag_image(struct wiki_request *r, struct tag *t, char *ptr)
 	char		*tag;
 	char		*src, *label;
 	char		*format;
+	int		ext_addr = 0;
 
 	/* Find end-tag */
 	ptr += 2;
@@ -259,17 +260,22 @@ generate_tag_image(struct wiki_request *r, struct tag *t, char *ptr)
 	 * internal images
 	 */
 	if (strncmp(src, "http://", 7) == 0 ||
-	    strncmp(src, "https://", 8) == 0)
+	    strncmp(src, "https://", 8) == 0) {
 		format = "<img src=\"%s\" alt=\"%s\" />";
-	else
-		format = "<img src=\"img/%s\" alt=\"%s\" />";
+		ext_addr = 1;
+	} else
+		format = "<img src=\"%s/img/%s\" alt=\"%s\" />";
 
 	/* FIXME -
 	 * keep track of allocated data - we want to free it
 	 * when we're done with it
 	 */
 	tag = malloc(strlen(src) + strlen(label) + strlen(format));
-	sprintf(tag, format, src, label);
+	
+	if (ext_addr)
+		sprintf(tag, format, src, label);
+	else
+		sprintf(tag, format, config.base_url, src, label);
 	t->start_tag = tag;
 	t->end_tag = NULL;
 	t->start_ptr = NULL;
