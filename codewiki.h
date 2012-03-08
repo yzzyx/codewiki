@@ -49,6 +49,18 @@
 #define DPRINTF(x...)
 #endif
 
+/* cgi/mime stuff */
+struct cgi_var {
+	LIST_ENTRY(cgi_var)	entry;
+	char			*name;
+	char			*value;
+	int			value_len;
+};
+LIST_HEAD(cgi_var_list, cgi_var);
+
+char *mime_get_key(const char *, const char *);
+int mime_parse(struct cgi_var_list *, const char *);
+
 /* Page */
 struct page_part {
 	TAILQ_ENTRY(page_part)	entry;
@@ -68,10 +80,15 @@ struct wiki_request {
 	char			*data;
 	char			*requested_page;
 	int			edit;
+	char			*err_str;
 
 	struct page_part_list	page_contents;
 	struct page_part_list	stylesheets;
 	struct page_part_list	scripts;
+
+	struct cgi_var_list	cgi_vars;
+	struct cgi_var_list	cookie_vars;
+	int			sent_headers;
 };
 
 
@@ -111,7 +128,7 @@ extern struct config config;
 int wiki_stat_page(const char *);
 char *wiki_load_generated(const char *);
 int wiki_load_data(const char *page, char **result);
-int wiki_save_data(const char *, const char *);
+int wiki_save_data(const char *, const char *, int);
 int wiki_save_generated(const char *, const char *);
 int wiki_list_history(const char *page, struct page_part_list *list);
 
@@ -129,7 +146,6 @@ int wiki_ticket_access(const char *, const char *);
 int wiki_ticket_clear(const char *);
 
 /* functions not yet implemented:
-int wiki_save_data(const char *, const char *);
 int wiki_list_revisions(const char *, struct revision *);
 char *wiki_load_revision(const char *, struct revision *)
 */
@@ -147,6 +163,8 @@ int wiki_request_serve(struct wiki_request *);
 int wiki_request_clear(struct wiki_request *);
 
 /* Differs between CGI-implementations */
+int webserver_getc();
+int webserver_eof();
 int webserver_output(struct wiki_request *r, const char *, ...);
 int webserver_output_buf(struct wiki_request *r, const char *, int);
 #endif

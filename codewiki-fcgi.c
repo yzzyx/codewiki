@@ -1,4 +1,4 @@
-/*
+ /*
  codewiki - small wiki-page parser
  Copyright (C) 2012 Elias Norberg
 
@@ -27,17 +27,6 @@
 #include "codewiki.h"
 
 extern char **environ;
-
-struct cgi_var {
-	LIST_ENTRY(cgi_var)	entry;
-	char			*name;
-	char			*value;
-};
-LIST_HEAD(cgi_var_list, cgi_var);
-struct cgi_var_list cgi_vars;
-struct cgi_var_list cookie_vars;
-
-int		sent_headers;
 
 void
 cgi_urldecode(char *data)
@@ -116,8 +105,11 @@ void cgi_split_str(char *str, struct cgi_var_list *list, char str_sep)
 
 		if (cv->name)
 			cgi_urldecode(cv->name);
-		if (cv->value)
+		if (cv->value) {
 			cgi_urldecode(cv->value);
+			cv->value_len = strlen(cv->value);
+		} else
+			cv->value_len = 0;
 
 		LIST_INSERT_HEAD(list, cv, entry);
 		ptr = next_ptr;
@@ -125,22 +117,21 @@ void cgi_split_str(char *str, struct cgi_var_list *list, char str_sep)
 }
 
 int
-cgi_set_vars(char *GET, char *POST, char *COOKIE)
+cgi_set_vars(struct wiki_request *wr, char *GET, char *COOKIE)
 {
-	cgi_split_str(GET, &cgi_vars, '&');
-	cgi_split_str(POST, &cgi_vars, '&');
-	cgi_split_str(COOKIE, &cookie_vars, ';');
+	cgi_split_str(GET, &wr->cgi_vars, '&');
+	cgi_split_str(COOKIE, &wr->cookie_vars, ';');
 	return (0);
 }
 
 int
-cgi_clear_vars()
+cgi_clear_vars(struct wiki_request *wr)
 {
 	struct cgi_var		*cv;
 
-	while(cgi_vars.lh_first != NULL) {
-		cv = cgi_vars.lh_first;
-		LIST_REMOVE(cgi_vars.lh_first, entry);
+	while(wr->cgi_vars.lh_first != NULL) {
+		cv = wr->cgi_vars.lh_first;
+		LIST_REMOVE(wr->cgi_vars.lh_first, entry);
 
 		if (cv->name)
 			free(cv->name);
@@ -149,9 +140,9 @@ cgi_clear_vars()
 		free(cv);
 	}
 
-	while(cookie_vars.lh_first != NULL) {
-		cv = cookie_vars.lh_first;
-		LIST_REMOVE(cookie_vars.lh_first, entry);
+	while(wr->cookie_vars.lh_first != NULL) {
+		cv = wr->cookie_vars.lh_first;
+		LIST_REMOVE(wr->cookie_vars.lh_first, entry);
 		if (cv->name)
 			free(cv->name);
 		if (cv->value)
@@ -162,34 +153,51 @@ cgi_clear_vars()
 	return (0);
 }
 
-static char *
-cgi_get_type(struct cgi_var_list *lst, const char *variable_name)
+static int
+cgi_get_bin_type(struct cgi_var_list *lst, const char *variable_name,
+    char **res)
 {
 	struct cgi_var	*cv;
 
 	LIST_FOREACH(cv, lst, entry) {
 		if (cv->name == NULL) {
-			if (variable_name == NULL)
-				return (cv->value);
+			if (variable_name == NULL) {
+				*res = cv->value;
+				return (cv->value_len);
+			}
 			continue;
 		}
-		if (strcmp(cv->name, variable_name) == 0)
-			return (cv->value);
+		if (strcmp(cv->name, variable_name) == 0) {
+			*res = cv->value;
+			return (cv->value_len);
+		}
 	}
 
-	return NULL;
+	*res = NULL;
+	return 0;
 }
 
-#define cgi_get(v) cgi_get_type(&cgi_vars, v)
-#define cgi_get_cookie(v) cgi_get_type(&cookie_vars, v)
+static char *
+cgi_get_type(struct cgi_var_list *lst, const char *variable_name)
+{
+	char *result;
+
+	cgi_get_bin_type(lst, variable_name, &result);
+	return (result);
+}
+
+
+#define cgi_get(wr, v) cgi_get_type(&wr->cgi_vars, v)
+#define cgi_get_bin(wr, v, r) cgi_get_bin_type(&wr->cgi_vars, v, r)
+#define cgi_get_cookie(wr, v) cgi_get_type(&wr->cookie_vars, v)
 
 static int
-cgi_get_int(const char *variable_name)
+cgi_get_int(struct wiki_request *wr, const char *variable_name)
 {
 	char		*val_str;
 	int		val;
 
-	val_str = cgi_get(variable_name);
+	val_str = cgi_get(wr, variable_name);
 	if (val_str == NULL)
 		return -1;
 
@@ -198,15 +206,62 @@ cgi_get_int(const char *variable_name)
 }
 
 static void
-cgi_set_cookie(const char *cookie_name, const char *value)
+cgi_set_cookie(struct wiki_request *wr, const char *cookie_name, const char *value)
 {
 	struct cgi_var	*cv;
 
 	cv = malloc(sizeof *cv);
 	cv->name = strdup(cookie_name);
 	cv->value = strdup(value);
+	cv->value_len = strlen(value);
 
-	LIST_INSERT_HEAD(&cookie_vars, cv, entry);
+#undef printf
+	printf("Adding cookie: %s:%s\n", cv->name, cv->value);
+#define printf FCGI_printf
+
+	LIST_INSERT_HEAD(&wr->cookie_vars, cv, entry);
+}
+
+int
+cgi_handle_post(struct wiki_request *wr, char *content_type, int content_len)
+{
+	char		*boundary;
+	char		*ptr;
+
+	if (strcmp(content_type, "application/x-www-form-urlencoded") == 0) {
+		ptr = alloca(content_len+1);
+		if (fread(ptr, 1, content_len, stdin)  < content_len) {
+			wr->err_str = "Could not read request!";
+			return (-1);
+		}
+		ptr[content_len] = '\0';
+		cgi_split_str(ptr, &wr->cgi_vars, '&');
+	} else if (strncmp(content_type,
+		"multipart/form-data",
+		strlen("multipart/form-data")) == 0) {
+
+#undef printf
+		printf("multipart/form-data!\n");
+		/* Get boundary */
+		boundary = mime_get_key(content_type, "boundary");
+		printf("boundary: %s\n", boundary);
+#define printf FCGI_printf
+		mime_parse(&wr->cgi_vars, boundary);
+		free(boundary);
+	}
+	return (0);
+}
+
+int
+webserver_getc()
+{
+	return fgetc(stdin);
+}
+
+int
+webserver_eof()
+{
+	return feof(stdin);
 }
 
 int
@@ -216,17 +271,17 @@ webserver_output(struct wiki_request *r, const char *fmt, ...)
 	va_list		ap;
 	int		ret;
 
-	if (sent_headers == 0) {
+	if (r->sent_headers == 0) {
 		printf("Content-Type: %s\r\n", r->mime_type);
 
-		LIST_FOREACH(cv, &cookie_vars, entry) {
+		LIST_FOREACH(cv, &r->cookie_vars, entry) {
 			if (cv->name == NULL)
 				continue;
 			printf("Set-Cookie: %s=%s; Path=/\r\n",
 			    cv->name, cv->value);
 		}
 		printf("\r\n");
-		sent_headers = 1;
+		r->sent_headers = 1;
 	}
 	va_start(ap, fmt);
 	ret = vprintf(fmt,ap);
@@ -240,19 +295,21 @@ webserver_output_buf(struct wiki_request *r, const char *buf, int nb)
 {
 	struct cgi_var	*cv;
 
-	if (sent_headers == 0) {
+	if (r->sent_headers == 0) {
 		printf("Content-Type: %s\r\n", r->mime_type);
 
-		LIST_FOREACH(cv, &cookie_vars, entry) {
+		LIST_FOREACH(cv, &r->cookie_vars, entry) {
 			if (cv->name == NULL)
 				continue;
 			printf("Set-Cookie: %s=%s; Path=/\r\n",
 			    cv->name, cv->value);
 		}
 		printf("\r\n");
-		sent_headers = 1;
+		r->sent_headers = 1;
 	}
 
+	if (buf == NULL || nb == 0)
+		return (0);
 	return fwrite((char *)buf, 1, nb, stdout);
 }
 
@@ -260,20 +317,11 @@ int
 main(int argc, char *argv[], char *envp[])
 {
 	struct wiki_request	*r;
-	char			*err_str;
 	char			*ptr;
 	int			nb, ret;
 	char			*ticket;
 	int			page_access;
-
-	char			*POST;
-	int			POST_len;
-
-	POST = NULL;
-	POST_len = -1;
-
-	LIST_INIT(&cgi_vars);
-	LIST_INIT(&cookie_vars);
+	int			i;
 
 	wiki_load_config();
 	wiki_init();
@@ -284,12 +332,17 @@ main(int argc, char *argv[], char *envp[])
 
 		/* Initialize variables */
 		nb = 0;
-		err_str = NULL;
-		sent_headers = 0;
+		r->err_str = NULL;
+		r->sent_headers = 0;
+
+#undef printf
+		for (i = 0; environ[i] != NULL; i++)
+			printf("%s<br>\n", environ[i]);
+#define printf FCGI_printf
 
 		r->requested_page = getenv("PATH_INFO");
 		if (r->requested_page == NULL) {
-			err_str = "No PATH_INFO supplied. "
+			r->err_str = "No PATH_INFO supplied. "
 			    "Is your webserver configured correctly?";
 			goto err;
 		}
@@ -303,32 +356,17 @@ main(int argc, char *argv[], char *envp[])
 		if (ptr != NULL)
 			nb = strtol(ptr, NULL, 10);
 
-		if (nb > 0) {
-			if (nb > POST_len) {
-				if ((POST = realloc(POST,nb+1)) == NULL) {
-					POST_len = -1;
-					goto err;
-				}
-				POST_len = nb;
-			}
+		if (nb > 0)
+			cgi_handle_post(r, getenv("CONTENT_TYPE"), nb);
 
-			if (fread(POST, 1, nb, stdin)  < nb) {
-				err_str = "Could not read request!";
-				goto err;
-			}
-			POST[nb] = '\0';
-		} else if (POST)
-			POST[0] = '\0';
-
-
-		cgi_set_vars(getenv("QUERY_STRING"), POST,
+		cgi_set_vars(r, getenv("QUERY_STRING"),
 		             getenv("HTTP_COOKIE"));
 
-		if (cgi_get_int("login") > 0) {
+		if (cgi_get_int(r, "login") > 0) {
 			char *user, *password;
 
-			user = cgi_get("user");
-			password = cgi_get("password");
+			user = cgi_get(r, "user");
+			password = cgi_get(r, "password");
 
 			if (user == NULL) {
 				/* Show login-page */
@@ -338,40 +376,45 @@ main(int argc, char *argv[], char *envp[])
 
 			ret = wiki_login(user, password);
 			if (ret == WIKI_LOGIN_WRONG_PASSWORD)
-				err_str = "No such user/password!";
+				r->err_str = "No such user/password!";
 			else if (ret == WIKI_LOGIN_ERROR)
-				err_str = "Unknown error - try again later.";
+				r->err_str = "Unknown error - try again later.";
 
-			if (err_str) {
+			if (r->err_str) {
 				r->requested_page = "_login";
 				goto show_page;
 			}
 
 			ticket = wiki_ticket_get(user);
-			cgi_set_cookie("wiki_ticket", ticket);
-		} else if (cgi_get_int("logout") > 0) {
-			ticket = cgi_get_cookie("wiki_ticket");
+			cgi_set_cookie(r, "wiki_ticket", ticket);
+		} else if (cgi_get_int(r, "logout") > 0) {
+			ticket = cgi_get_cookie(r, "wiki_ticket");
 			wiki_ticket_clear(ticket);
-			cgi_set_cookie("wiki_ticket", NULL);
+			cgi_set_cookie(r, "wiki_ticket", NULL);
 		}
 
-		ticket = cgi_get_cookie("wiki_ticket");
+		ticket = cgi_get_cookie(r, "wiki_ticket");
 		page_access = wiki_ticket_access(ticket, r->requested_page);
 
-		if (cgi_get_int("save") > 0) {
+		if (cgi_get_int(r, "save") > 0) {
+			r->edit = 1;
 			if (!(page_access & WIKI_TICKET_WRITE)) {
-				err_str = "You don't have enough rights to update this page!";
+				r->err_str = "You don't have enough rights to update this page!";
 				goto show_page;
 			}
 
-			wiki_save_data(r->requested_page, cgi_get("wikiData"));
+			nb = cgi_get_bin(r, "wikiData", &ptr);
+#undef printf
+			printf("Saving page\n");
+#define printf FCGI_printf
+			wiki_save_data(r->requested_page, ptr, nb);
 		}
 		
-		if (cgi_get_int("edit") > 0) {
+		if (cgi_get_int(r, "edit") > 0) {
 			if (page_access & WIKI_TICKET_WRITE)
 				r->edit = 1;
 			else {
-				err_str = "You don't have enough rights to update this page!";
+				r->err_str = "You don't have enough rights to update this page!";
 				r->requested_page = "_login";
 			}
 		}
@@ -393,18 +436,14 @@ show_page:
 		if (ticket)
 			printf("ticket: %s<br>\n", ticket);
 
-		if (err_str)
-			printf("err_str: %s<br>\n", err_str);
+		if (r->err_str)
+			printf("err_str: %s<br>\n", r->err_str);
 
-		if (POST)
-			printf("POST:%s<br>\n", POST);
-
-		struct cgi_var	*cv;
-		int i;
 		for (i = 0; environ[i] != NULL; i++)
 			printf("%s<br>\n", environ[i]);
 
-		LIST_FOREACH(cv, &cookie_vars, entry) {
+		struct cgi_var	*cv;
+		LIST_FOREACH(cv, &r->cookie_vars, entry) {
 			if (cv->name) printf("%s", cv->name);
 			printf(":");
 			if (cv->value) printf("%s", cv->value);
@@ -413,7 +452,7 @@ show_page:
 
 
 		FCGI_Finish();
-		cgi_clear_vars();
+		cgi_clear_vars(r);
 
 		/* Cleanup */
 		wiki_request_clear(r);
@@ -422,12 +461,12 @@ show_page:
 err:
 		printf("Content-Type: text/html\r\n\r\n");
 		printf("Error processing request<br>\n");
-		if (err_str)
-			printf("%s<br>\n", err_str);
+		if (r->err_str)
+			printf("%s<br>\n", r->err_str);
 
 		FCGI_Finish();
 
-		cgi_clear_vars();
+		cgi_clear_vars(r);
 		wiki_request_clear(r);
 	}
 	fflush(stdout);

@@ -58,7 +58,7 @@ file_get_contents(const char *filename, char **result)
 }
 
 static int
-file_set_contents(const char *filename, const char *contents)
+file_set_contents(const char *filename, const char *contents, size_t len)
 {
 	struct stat	st;
 	FILE		*fd;
@@ -89,10 +89,11 @@ file_set_contents(const char *filename, const char *contents)
 	if ((fd = fopen(filename, "w")) == NULL)
 		return (-1);
 
+	printf("writing %d bytes to file %s\n", len, filename);
 	tot_nb = 0;
 	ptr = (char *)contents;
-	while (contents && tot_nb < strlen(contents)) {
-		nb = fwrite(ptr, 1, strlen(ptr), fd);
+	while (contents && tot_nb < len) {
+		nb = fwrite(ptr, 1, len, fd);
 		if (ferror(fd) || nb == 0) {
 			fclose(fd);
 			return (-1);
@@ -119,7 +120,7 @@ wiki_save_generated(const char *page, const char *contents)
 
 	snprintf(filename, sizeof filename, "%s/%s/generated.html",
 	    CONTENTS_DIR, page);
-	return file_set_contents(filename, contents);
+	return file_set_contents(filename, contents, strlen(contents));
 }
 
 char *
@@ -137,11 +138,14 @@ wiki_load_generated(const char *page)
 }
 
 int
-wiki_save_data(const char *page, const char *data)
+wiki_save_data(const char *page, const char *data, int len)
 {
 	char		filename[PATH_MAX];
 	char		new_file[PATH_MAX];
 	struct stat	st;
+
+	if (len == -1)
+		len = strlen(data);
 
 	snprintf(filename, sizeof filename, "%s/%s/latest",
 	    CONTENTS_DIR, page);
@@ -154,7 +158,7 @@ wiki_save_data(const char *page, const char *data)
 	rename(filename, new_file);
 
 	DPRINTF("saving file %s\n", filename);
-	return file_set_contents(filename, data);
+	return file_set_contents(filename, data, len);
 }
 
 int

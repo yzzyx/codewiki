@@ -1,7 +1,7 @@
 CFLAGS+=-Wall -ggdb3 -DDEBUG
 LDFLAGS+=-lcrypt
 SRCS=$(shell ls *.c)
-OBJS=file.o tags.o codewiki.o
+OBJS=file.o tags.o codewiki.o mime.o
 DEPS= $(addsuffix .depend, $(OBJS))
 
 CC?=gcc

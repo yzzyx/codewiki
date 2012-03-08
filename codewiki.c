@@ -317,7 +317,11 @@ page_edit(struct wiki_request *r, char *page_data)
 	pp_list_free(&history);
 	webserver_output(r, "</ul>\n</div>\n");
 
-	webserver_output(r, "<form method=\"POST\" action=\"?\">\n"
+	webserver_output(r, "<form method=\"POST\" action=\"?\"");
+	if (r->page_type == WIKI_PAGE_TYPE_IMAGE)
+		webserver_output(r, " enctype=\"multipart/form-data\"");
+
+	webserver_output(r, ">\n"
 	    "<input type=\"hidden\" name=\"p\" value=\"%s\" />\n"
 	    "<input type=\"hidden\" name=\"time\" value=\"%ld\" />\n"
 	    "<input type=\"hidden\" name=\"save\" value=\"1\" />\n",
@@ -368,6 +372,9 @@ wiki_request_new()
 	if ((r = malloc(sizeof *r)) == NULL)
 		return (NULL);
 
+	LIST_INIT(&r->cgi_vars);
+	LIST_INIT(&r->cookie_vars);
+
 	TAILQ_INIT(&r->page_contents);
 	TAILQ_INIT(&r->stylesheets);
 	TAILQ_INIT(&r->scripts);
@@ -376,6 +383,7 @@ wiki_request_new()
 	r->mime_type = NULL;
 	r->edit = 0;
 	r->data = NULL;
+	r->err_str = NULL;
 
 	return (r);
 }
@@ -471,6 +479,8 @@ wiki_request_serve(struct wiki_request *r)
 	char		buf[1024];
 
 	DPRINTF("requested_page: %s\n", r->requested_page);
+
+	page = NULL;
 
 	/* Default page */
 	if (r->requested_page == NULL)
@@ -587,7 +597,9 @@ wiki_request_serve(struct wiki_request *r)
 		page_parse(r, page, NULL);
 		page_print(r);
 	}
-	free(page);
+
+	if (page)
+		free(page);
 
 	if (header)
 		free(header);
@@ -759,6 +771,8 @@ wiki_ticket_access(const char *ticket, const char *page)
 
 	if (ticket == NULL)
 		return (WIKI_TICKET_READ);
+
+	DPRINTF("Searching for ticket '%s'\n", ticket);
 
 	search.ticket = (char *)ticket;
 	t = RB_FIND(ticket_list, &tickets, &search);
