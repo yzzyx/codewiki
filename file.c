@@ -11,6 +11,45 @@
 #include <errno.h>
 #include "codewiki.h"
 
+static FILE *
+file_get_fd(const char *filename, int create)
+{
+	struct stat	st;
+	FILE		*fd;
+	char		*ptr;
+	char		*dir;
+	char		*mode;
+
+	if (create) {
+		/* Create directory structure if needed */
+		dir = strdup(filename);
+		ptr = strrchr(dir, '/');
+		if (ptr == NULL) {
+			errno = ENOENT;
+			return (NULL);
+		}
+		*ptr = '\0';
+
+		if (stat(dir, &st) != 0) {
+			if (mkdir(dir, 0777) == -1)
+				return (NULL);
+		} else {
+			if (!S_ISDIR(st.st_mode)) {
+				errno = ENOENT;
+				return (NULL);
+			}
+		}
+		free(dir);
+
+		mode = "w";
+	} else
+		mode = "r";
+	
+	if ((fd = fopen(filename, mode)) == NULL)
+		return (NULL);
+	return (fd);
+}
+
 static int
 file_get_contents(const char *filename, char **result)
 {
@@ -20,7 +59,7 @@ file_get_contents(const char *filename, char **result)
 	size_t		nb, tot_nb;
 
 	*result = NULL;
-	if ((fd = fopen(filename, "r")) == NULL)
+	if ((fd = file_get_fd(filename, 0)) == NULL)
 		return (-1);
 
 	if ((contents = malloc(BUF_SIZE)) == NULL) {
@@ -60,33 +99,11 @@ file_get_contents(const char *filename, char **result)
 static int
 file_set_contents(const char *filename, const char *contents, size_t len)
 {
-	struct stat	st;
 	FILE		*fd;
 	char		*ptr;
-	char		*dir;
 	size_t		nb, tot_nb;
 
-	/* Create directory structure if needed */
-	dir = strdup(filename);
-	ptr = strrchr(dir, '/');
-	if (ptr == NULL) {
-		errno = ENOENT;
-		return (-1);
-	}
-	*ptr = '\0';
-
-	if (stat(dir, &st) != 0) {
-		if (mkdir(dir, 0777) == -1)
-			return (-1);
-	} else {
-		if (!S_ISDIR(st.st_mode)) {
-			errno = ENOENT;
-			return (-1);
-		}
-	}
-	free(dir);
-	
-	if ((fd = fopen(filename, "w")) == NULL)
+	if ((fd = file_get_fd(filename, 1)) == NULL)
 		return (-1);
 
 	printf("writing %d bytes to file %s\n", len, filename);
@@ -106,11 +123,44 @@ file_set_contents(const char *filename, const char *contents, size_t len)
 	return (0);
 }
 
+static int
+mtime_cmp(const char *page)
+{
+	struct stat st1, st2;
+	char		generated[PATH_MAX];
+	char		latest[PATH_MAX];
+
+	snprintf(generated, sizeof generated, "%s/%s/generated.html",
+	    config.contents_dir, page);
+
+	snprintf(latest, sizeof latest, "%s/%s/latest",
+	    config.contents_dir, page);
+
+	if (stat(generated, &st1) == -1)
+		return (1);
+
+	if (stat(latest, &st2) == -1)
+		return (-1);
+
+	return (st2.st_mtime - st1.st_mtime);
+}
+
 int
 wiki_stat_page(const char *page)
 {
-	return STAT_PAGE_UPDATED_PAGE | STAT_PAGE_UPDATED_HEADER |
-	    STAT_PAGE_UPDATED_FOOTER;
+	int	pstat;
+
+	pstat = 0;
+	if (mtime_cmp(page) > 0)
+		pstat |= STAT_PAGE_UPDATED_PAGE;
+
+	if (mtime_cmp("_header") > 0)
+		pstat |= STAT_PAGE_UPDATED_HEADER;
+
+	if (mtime_cmp("_footer") > 0)
+		pstat |= STAT_PAGE_UPDATED_FOOTER;
+
+	return (pstat);
 }
 
 int
@@ -121,6 +171,17 @@ wiki_save_generated(const char *page, const char *contents)
 	snprintf(filename, sizeof filename, "%s/%s/generated.html",
 	    config.contents_dir, page);
 	return file_set_contents(filename, contents, strlen(contents));
+}
+
+FILE *
+wiki_save_generated_fd(const char *page)
+{
+	char		filename[PATH_MAX];
+
+	snprintf(filename, sizeof filename, "%s/%s/generated.html",
+	    config.contents_dir, page);
+
+	return file_get_fd(filename, 1);
 }
 
 char *

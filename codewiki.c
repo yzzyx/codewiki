@@ -92,13 +92,15 @@ strcmpsuffix(const char *str, const char *suffix)
 }
 
 static int
-pp_list_free(struct page_part_list *ppl)
+pp_list_free(struct page_part_list *ppl, int free_data)
 {
 	struct page_part *pp;
 
 	while(ppl->tqh_first != NULL) {
 		pp = ppl->tqh_first;
 		TAILQ_REMOVE(ppl, pp, entry);
+		if (free_data)
+			free(pp->str);
 		free(pp);
 	}
 	return (0);
@@ -116,7 +118,7 @@ stylesheet_add(struct wiki_request *r, char *file)
 	}
 
 	pp = malloc(sizeof *pp);
-	pp->str = file;
+	pp->str = strdup(file);
 	TAILQ_INSERT_TAIL(&r->stylesheets, pp, entry);
 	return (0);
 }
@@ -132,8 +134,9 @@ script_add(struct wiki_request *r, char *file)
 			return (0);
 	}
 
+	DPRINTF("Adding javascript %s\n", file);
 	pp = malloc(sizeof *pp);
-	pp->str = file;
+	pp->str = strdup(file);
 	TAILQ_INSERT_TAIL(&r->scripts, pp, entry);
 	return (0);
 }
@@ -224,12 +227,13 @@ page_get(struct wiki_request *r)
 }
 
 static int
-page_print(struct wiki_request *r)
+page_print(struct wiki_request *r,
+    int(*f_output)(struct wiki_request *,const char *,...))
 {
 	struct page_part	*pp;
 
 	/* Headers */
-	webserver_output(r,
+	f_output(r,
 "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \n"
 "\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">\n"
 "<html>\n"
@@ -239,32 +243,32 @@ page_print(struct wiki_request *r)
 "http-equiv=\"Content-Type\" />\n", r->requested_page);
 
 	TAILQ_FOREACH(pp, &r->stylesheets, entry) {
-		webserver_output(r, "<link href=\"%s\" media=\"all\" rel=\"stylesheet\" "
+		f_output(r, "<link href=\"%s\" media=\"all\" rel=\"stylesheet\" "
 		    "type=\"text/css\"/>\n", pp->str);
 	}
 
 	TAILQ_FOREACH(pp, &r->scripts, entry) {
-		webserver_output(r,
+		f_output(r,
 		    "<script type=\"text/javascript\" src=\"%s\">"
 		    "</script>\n", pp->str);
 	}
 
-	webserver_output(r, "  </head>\n"
+	f_output(r, "  </head>\n"
 	    "<body onload=\"sh_highlightDocument();\">\n"
 	    "<div id=\"body\">\n");
 
 	if (header != NULL)
-		webserver_output(r, "<div id=\"header\">%s</div>\n", header);
+		f_output(r, "<div id=\"header\">%s</div>\n", header);
 
-	webserver_output(r, "  <div id=\"contents\">\n");
+	f_output(r, "  <div id=\"contents\">\n");
 	TAILQ_FOREACH(pp, &r->page_contents, entry) {
-		webserver_output(r, "%s", pp->str);
+		f_output(r, "%s", pp->str);
 	}
-	webserver_output(r, "  </div>\n");
+	f_output(r, "  </div>\n");
 	if (footer != NULL)
-		webserver_output(r, "<div id=\"footer\">%s</div>\n", footer);
+		f_output(r, "<div id=\"footer\">%s</div>\n", footer);
 
-	webserver_output(r, "</div>\n"
+	f_output(r, "</div>\n"
 	    "</body>\n"
 	    "</html>\n");
 
@@ -332,7 +336,7 @@ page_edit(struct wiki_request *r, char *page_data)
 		webserver_output(r, "<li><a href=\"?edit=1&history=%ld\">%s</a></li>",
 		    timestamp, timestamp_str);
 	}
-	pp_list_free(&history);
+	pp_list_free(&history, 0);
 	webserver_output(r, "</ul>\n</div>\n");
 
 	webserver_output(r, "<form method=\"POST\" action=\"?\"");
@@ -379,7 +383,19 @@ page_edit(struct wiki_request *r, char *page_data)
 	    "</html>\n");
 
 	return (0);
+}
 
+int
+wiki_fprintf(struct wiki_request *r, const char *fmt, ...)
+{
+	va_list		va;
+	int		ret;
+
+	va_start(va, fmt);
+	ret = vfprintf(r->output_fd, fmt, va);
+	va_end(va);
+
+	return (ret);
 }
 
 struct wiki_request *
@@ -413,9 +429,9 @@ wiki_request_new()
 static int
 wiki_request_clear_data(struct wiki_request *r)
 {
-	pp_list_free(&r->page_contents);
-	pp_list_free(&r->stylesheets);
-	pp_list_free(&r->scripts);
+	pp_list_free(&r->page_contents, 0);
+	pp_list_free(&r->stylesheets, 1);
+	pp_list_free(&r->scripts, 1);
 
 	return (0);
 }
@@ -495,7 +511,6 @@ int
 wiki_request_serve(struct wiki_request *r)
 {
 	char		*page;
-	char		*data;
 	int		st;
 
 	DPRINTF("requested_page: %s\n", r->requested_page);
@@ -540,7 +555,7 @@ wiki_request_serve(struct wiki_request *r)
 		    r->page_type == WIKI_PAGE_TYPE_CSS) {
 			/* FIXME - use X-Sendfile if possible */
 			page = wiki_get_data_filename(r->requested_page);
-			printf("Sending file %s\n", page);
+			DPRINTF("Sending file %s\n", page);
 			webserver_output_file(r, page);
 			free(page);
 
@@ -553,7 +568,9 @@ wiki_request_serve(struct wiki_request *r)
 		st = wiki_stat_page(r->requested_page);
 		if (st == STAT_PAGE_NO_UPDATES) {
 			DPRINTF("no update, send generated\n");
+
 			page = wiki_get_generated_filename(r->requested_page);
+			DPRINTF("Sending file %s\n", page);
 			webserver_output_file(r, page);
 			free(page);
 
@@ -607,12 +624,12 @@ wiki_request_serve(struct wiki_request *r)
 	} else {
 		DPRINTF("parsing page %s\n", r->requested_page);
 		page_parse(r, page, NULL);
-		page_print(r);
+		page_print(r, webserver_output);
 
 		/* Save generated page */
-		data = page_get(r);
-		wiki_save_generated(r->requested_page, data);
-		free(data);
+		r->output_fd = wiki_save_generated_fd(r->requested_page);
+		page_print(r, wiki_fprintf);
+		fclose(r->output_fd);
 	}
 
 	if (page)

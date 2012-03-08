@@ -80,6 +80,7 @@ struct wiki_request {
 	char			*requested_page;
 	int			edit;
 	char			*err_str;
+	FILE			*output_fd;
 
 	struct page_part_list	page_contents;
 	struct page_part_list	stylesheets;
@@ -132,6 +133,7 @@ char *wiki_load_generated(const char *);
 int wiki_load_data(const char *page, char **result);
 int wiki_save_data(const char *, const char *, int);
 int wiki_save_generated(const char *, const char *);
+FILE * wiki_save_generated_fd(const char *page);
 int wiki_list_history(const char *page, struct page_part_list *list);
 char *wiki_get_data_filename(const char *);
 char *wiki_get_generated_filename(const char *);
