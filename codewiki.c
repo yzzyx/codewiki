@@ -495,6 +495,7 @@ int
 wiki_request_serve(struct wiki_request *r)
 {
 	char		*page;
+	char		*data;
 	int		st;
 
 	DPRINTF("requested_page: %s\n", r->requested_page);
@@ -607,6 +608,11 @@ wiki_request_serve(struct wiki_request *r)
 		DPRINTF("parsing page %s\n", r->requested_page);
 		page_parse(r, page, NULL);
 		page_print(r);
+
+		/* Save generated page */
+		data = page_get(r);
+		wiki_save_generated(r->requested_page, data);
+		free(data);
 	}
 
 	if (page)
