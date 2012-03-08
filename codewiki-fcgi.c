@@ -215,10 +215,6 @@ cgi_set_cookie(struct wiki_request *wr, const char *cookie_name, const char *val
 	cv->value = strdup(value);
 	cv->value_len = strlen(value);
 
-#undef printf
-	printf("Adding cookie: %s:%s\n", cv->name, cv->value);
-#define printf FCGI_printf
-
 	LIST_INSERT_HEAD(&wr->cookie_vars, cv, entry);
 }
 
@@ -240,12 +236,8 @@ cgi_handle_post(struct wiki_request *wr, char *content_type, int content_len)
 		"multipart/form-data",
 		strlen("multipart/form-data")) == 0) {
 
-#undef printf
-		printf("multipart/form-data!\n");
 		/* Get boundary */
 		boundary = mime_get_key(content_type, "boundary");
-		printf("boundary: %s\n", boundary);
-#define printf FCGI_printf
 		mime_parse(&wr->cgi_vars, boundary);
 		free(boundary);
 	}
@@ -270,20 +262,10 @@ fcgi_send_headers(struct wiki_request *r)
 	struct cgi_var	*cv;
 
 	if (r->sent_headers == 0) {
-#undef printf
-		printf("Headers:\n---------\n");
-#define printf FCGI_printf
-		if (r->extra_headers) {
+		if (r->extra_headers)
 			printf("%s", r->extra_headers);
-#undef printf
-		printf("%s", r->extra_headers);
-#define printf FCGI_printf
-		}
 
 		printf("Content-Type: %s\r\n", r->mime_type);
-#undef printf
-		printf("Content-Type: %s\r\n", r->mime_type);
-#define printf FCGI_printf
 
 		LIST_FOREACH(cv, &r->cookie_vars, entry) {
 			if (cv->name == NULL)
@@ -379,11 +361,6 @@ main(int argc, char *argv[], char *envp[])
 		r->sent_headers = 0;
 		r->extra_headers = NULL;
 
-#undef printf
-		for (i = 0; environ[i] != NULL; i++)
-			printf("%s<br>\n", environ[i]);
-#define printf FCGI_printf
-
 		r->requested_page = getenv("PATH_INFO");
 		if (r->requested_page == NULL) {
 			r->err_str = "No PATH_INFO supplied. "
@@ -448,9 +425,6 @@ main(int argc, char *argv[], char *envp[])
 			}
 
 			nb = cgi_get_bin(r, "wikiData", &ptr);
-#undef printf
-			printf("Saving page\n");
-#define printf FCGI_printf
 			wiki_save_data(r->requested_page, ptr, nb);
 		}
 		
@@ -474,11 +448,12 @@ main(int argc, char *argv[], char *envp[])
 
 show_page:
 		wiki_request_serve(r);
-		printf("QUERY_STRING: %s<br>\n", getenv("QUERY_STRING"));
-		printf("PATH_INFO: %s<br>\n", getenv("PATH_INFO"));
-		printf("CONTENT_LENGTH: %d<br>\n", nb);
+#undef printf
+		DPRINTF("QUERY_STRING: %s<br>\n", getenv("QUERY_STRING"));
+		DPRINTF("PATH_INFO: %s<br>\n", getenv("PATH_INFO"));
+		DPRINTF("CONTENT_LENGTH: %d<br>\n", nb);
 		if (ticket)
-			printf("ticket: %s<br>\n", ticket);
+			DPRINTF("ticket: %s<br>\n", ticket);
 
 		if (r->err_str)
 			printf("err_str: %s<br>\n", r->err_str);
@@ -500,7 +475,7 @@ show_page:
 
 		/* Cleanup */
 		wiki_request_clear(r);
-
+#define printf FCGI_printf
 		continue;
 err:
 		printf("Content-Type: text/html\r\n\r\n");
