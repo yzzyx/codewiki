@@ -17,6 +17,7 @@
 */
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <unistd.h>
 #include <limits.h>
 #include <string.h>
@@ -33,6 +34,8 @@
 #define TICKET_VALID_CHARS "abcdefghijklmnopqrstuvwxyz" \
 			   "ABCDEFGHIJKLMNOPQRSTUVWXYZ" \
 			   ".:-_()[]"
+
+struct config config;
 
 struct ticket {
 	char			*ticket;
@@ -52,10 +55,25 @@ ticket_rb_cmp(struct ticket *a, struct ticket *b)
 }
 RB_GENERATE(ticket_list, ticket, entry, ticket_rb_cmp);
 
-struct config config;
 
 char *header = NULL;
 char *footer = NULL;
+
+char *
+printf_strdup(const char *fmt, ...)
+{
+	/* Yes - the maximum length is 1024.
+	 * Yes - it could be done in a better way.
+	 */
+	char		buf[1024];
+	va_list		ap;
+
+	va_start(ap, fmt);
+	vsnprintf(buf, sizeof buf, fmt, ap);
+	va_end(ap);
+
+	return (strdup(buf));
+}
 
 int
 strcmpsuffix(const char *str, const char *suffix)
@@ -385,6 +403,9 @@ wiki_request_new()
 	r->data = NULL;
 	r->err_str = NULL;
 
+	r->sent_headers = 0;
+	r->extra_headers = NULL;
+
 	return (r);
 }
 
@@ -473,10 +494,8 @@ wiki_set_page_type(struct wiki_request *r)
 int
 wiki_request_serve(struct wiki_request *r)
 {
-	FILE		*fd;
 	char		*page;
-	int		st, nb;
-	char		buf[1024];
+	int		st;
 
 	DPRINTF("requested_page: %s\n", r->requested_page);
 
@@ -509,17 +528,7 @@ wiki_request_serve(struct wiki_request *r)
 		 */
 		/* FIXME - this is not implemented */
 		//		webserver_output_file(requested_page);
-		if ((fd = fopen(r->requested_page, "r")) == NULL) {
-			return (-1);
-		}
-
-		while (!feof(fd)) {
-			nb = fread(buf, 1, sizeof buf, fd);
-			if (nb == 0 && ferror(fd))
-				break;
-			webserver_output_buf(r, buf, nb);
-		}
-		fclose(fd);
+		webserver_output_file(r, r->requested_page);
 		return (0);
 	}
 
@@ -529,8 +538,9 @@ wiki_request_serve(struct wiki_request *r)
 		if (r->page_type == WIKI_PAGE_TYPE_IMAGE ||
 		    r->page_type == WIKI_PAGE_TYPE_CSS) {
 			/* FIXME - use X-Sendfile if possible */
-			nb = wiki_load_data(r->requested_page, &page);
-			webserver_output_buf(r, page, nb);
+			page = wiki_get_data_filename(r->requested_page);
+			printf("Sending file %s\n", page);
+			webserver_output_file(r, page);
 			free(page);
 
 			return (0);
@@ -542,9 +552,10 @@ wiki_request_serve(struct wiki_request *r)
 		st = wiki_stat_page(r->requested_page);
 		if (st == STAT_PAGE_NO_UPDATES) {
 			DPRINTF("no update, send generated\n");
-			page = wiki_load_generated(r->requested_page);
-			webserver_output(r, "%s", page);
+			page = wiki_get_generated_filename(r->requested_page);
+			webserver_output_file(r, page);
 			free(page);
+
 			return (0);
 		}
 	}
@@ -627,6 +638,7 @@ wiki_load_config()
 	    };
 	char		*filename, *ptr;
 	int		cnt;
+	char		path[PATH_MAX];
 
 	/* Try the following:
 	 * $CODEWIKI_CONFIG
@@ -656,6 +668,9 @@ wiki_load_config()
 	if (filename == NULL) {
 		config.static_url = "/static";
 		config.base_url = "/wiki";
+		config.contents_dir = printf_strdup("%s/.contents",
+		    getcwd(path, sizeof path));
+		config.use_xsendfile = 1;
 	}
 
 	return (0);

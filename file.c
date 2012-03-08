@@ -119,7 +119,7 @@ wiki_save_generated(const char *page, const char *contents)
 	char		filename[PATH_MAX];
 
 	snprintf(filename, sizeof filename, "%s/%s/generated.html",
-	    CONTENTS_DIR, page);
+	    config.contents_dir, page);
 	return file_set_contents(filename, contents, strlen(contents));
 }
 
@@ -130,7 +130,7 @@ wiki_load_generated(const char *page)
 	char		*result;
 
 	snprintf(filename, sizeof filename, "%s/%s/generated.html",
-	    CONTENTS_DIR, page);
+	    config.contents_dir, page);
 
 	file_get_contents(filename, &result);
 
@@ -148,11 +148,11 @@ wiki_save_data(const char *page, const char *data, int len)
 		len = strlen(data);
 
 	snprintf(filename, sizeof filename, "%s/%s/latest",
-	    CONTENTS_DIR, page);
+	    config.contents_dir, page);
 
 	stat(filename, &st);
 	snprintf(new_file, sizeof new_file, "%s/%s/%ld",
-	    CONTENTS_DIR, page, st.st_mtime);
+	    config.contents_dir, page, st.st_mtime);
 
 	/* FIXME - check if file exists already */
 	rename(filename, new_file);
@@ -167,10 +167,29 @@ wiki_load_data(const char *page, char **result)
 	char		filename[PATH_MAX];
 
 	snprintf(filename, sizeof filename, "%s/%s/latest",
-	    CONTENTS_DIR, page);
+	    config.contents_dir, page);
 
 	DPRINTF("reading file %s\n", filename);
 	return file_get_contents(filename, result);
+}
+
+char *
+wiki_get_data_filename(const char *page)
+{
+	char		*filename;
+
+	filename = printf_strdup("%s/%s/latest", config.contents_dir, page);
+	return (filename);
+}
+
+char *
+wiki_get_generated_filename(const char *page)
+{
+	char		*filename;
+
+	filename = printf_strdup("%s/%s/generated.html", config.contents_dir,
+	    page);
+	return (filename);
 }
 
 int
@@ -185,7 +204,7 @@ wiki_list_history(const char *page, struct page_part_list *list)
 	int			i;
 
 	snprintf(path, sizeof path, "%s/%s/",
-	    CONTENTS_DIR, page);
+	    config.contents_dir, page);
 
 	cnt = 0;
 	TAILQ_INIT(list);

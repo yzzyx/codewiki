@@ -264,15 +264,26 @@ webserver_eof()
 	return feof(stdin);
 }
 
-int
-webserver_output(struct wiki_request *r, const char *fmt, ...)
+static void
+fcgi_send_headers(struct wiki_request *r)
 {
 	struct cgi_var	*cv;
-	va_list		ap;
-	int		ret;
 
 	if (r->sent_headers == 0) {
+#undef printf
+		printf("Headers:\n---------\n");
+#define printf FCGI_printf
+		if (r->extra_headers) {
+			printf("%s", r->extra_headers);
+#undef printf
+		printf("%s", r->extra_headers);
+#define printf FCGI_printf
+		}
+
 		printf("Content-Type: %s\r\n", r->mime_type);
+#undef printf
+		printf("Content-Type: %s\r\n", r->mime_type);
+#define printf FCGI_printf
 
 		LIST_FOREACH(cv, &r->cookie_vars, entry) {
 			if (cv->name == NULL)
@@ -283,6 +294,15 @@ webserver_output(struct wiki_request *r, const char *fmt, ...)
 		printf("\r\n");
 		r->sent_headers = 1;
 	}
+}
+
+int
+webserver_output(struct wiki_request *r, const char *fmt, ...)
+{
+	va_list		ap;
+	int		ret;
+
+	fcgi_send_headers(r);
 	va_start(ap, fmt);
 	ret = vprintf(fmt,ap);
 	va_end(ap);
@@ -293,24 +313,47 @@ webserver_output(struct wiki_request *r, const char *fmt, ...)
 int
 webserver_output_buf(struct wiki_request *r, const char *buf, int nb)
 {
-	struct cgi_var	*cv;
-
-	if (r->sent_headers == 0) {
-		printf("Content-Type: %s\r\n", r->mime_type);
-
-		LIST_FOREACH(cv, &r->cookie_vars, entry) {
-			if (cv->name == NULL)
-				continue;
-			printf("Set-Cookie: %s=%s; Path=/\r\n",
-			    cv->name, cv->value);
-		}
-		printf("\r\n");
-		r->sent_headers = 1;
-	}
+	fcgi_send_headers(r);
 
 	if (buf == NULL || nb == 0)
 		return (0);
 	return fwrite((char *)buf, 1, nb, stdout);
+}
+
+int
+webserver_output_file(struct wiki_request *r, const char *filename)
+{
+	FILE	*fd;
+	char	*format;
+
+	if (config.use_xsendfile) {
+		format = "X-Sendfile: %s\r\n";
+		r->extra_headers = alloca(strlen(filename) +
+					  strlen("format"));
+		sprintf(r->extra_headers, format, filename);
+		fcgi_send_headers(r);
+		return (0);
+	}
+
+	fcgi_send_headers(r);
+	if ((fd = fopen(filename, "r")) == NULL) {
+		return (-1);
+	}
+
+	{
+		int	nb;
+		char	buf[1024];
+
+		while (!feof(fd)) {
+			nb = fread(buf, 1, sizeof buf, fd);
+			if (nb == 0 && ferror(fd))
+				break;
+			webserver_output_buf(r, buf, nb);
+		}
+	}
+	fclose(fd);
+
+	return (0);
 }
 
 int
@@ -334,6 +377,7 @@ main(int argc, char *argv[], char *envp[])
 		nb = 0;
 		r->err_str = NULL;
 		r->sent_headers = 0;
+		r->extra_headers = NULL;
 
 #undef printf
 		for (i = 0; environ[i] != NULL; i++)

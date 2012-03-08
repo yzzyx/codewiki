@@ -39,7 +39,6 @@
 #endif
 
 /* FIXME - configurable settings */
-#define CONTENTS_DIR	".contents"
 #define BUF_SIZE	8000
 #define PTRS_SIZE	100
 
@@ -89,6 +88,7 @@ struct wiki_request {
 	struct cgi_var_list	cgi_vars;
 	struct cgi_var_list	cookie_vars;
 	int			sent_headers;
+	char			*extra_headers;
 };
 
 
@@ -118,6 +118,8 @@ void init_tags();
 struct config {
 	char		*static_url;
 	char		*base_url;
+	char		*contents_dir;
+	int		use_xsendfile;
 };
 extern struct config config;
 
@@ -131,6 +133,8 @@ int wiki_load_data(const char *page, char **result);
 int wiki_save_data(const char *, const char *, int);
 int wiki_save_generated(const char *, const char *);
 int wiki_list_history(const char *page, struct page_part_list *list);
+char *wiki_get_data_filename(const char *);
+char *wiki_get_generated_filename(const char *);
 
 #define WIKI_LOGIN_OK			(0)
 #define WIKI_LOGIN_WRONG_PASSWORD	(1)
@@ -152,6 +156,7 @@ char *wiki_load_revision(const char *, struct revision *)
 
 
 /* Common */
+char *printf_strdup(const char *, ...);
 int strcmpsuffix(const char *, const char *);
 int stylesheet_add(struct wiki_request *r, char *file);
 int script_add(struct wiki_request *r, char *file);
@@ -167,4 +172,5 @@ int webserver_getc();
 int webserver_eof();
 int webserver_output(struct wiki_request *r, const char *, ...);
 int webserver_output_buf(struct wiki_request *r, const char *, int);
+int webserver_output_file(struct wiki_request *r, const char *);
 #endif
