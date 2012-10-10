@@ -654,7 +654,6 @@ wiki_load_config_fd(FILE *fd)
 	size_t line;
 	char *str, *ptr,  *key, *val;
 
-	/* fparseln() ... */
 	for (;;) {
 		if ((str = fparseln(fd, &len, &line, NULL, 0)) == NULL)
 			if (feof(fd) || ferror(fd))
@@ -670,6 +669,8 @@ wiki_load_config_fd(FILE *fd)
 		if (key == NULL || ptr == NULL) {
 			fprintf(stderr, "[warning] invalid configuration entry on line %ld: '%s'\n", line, str);
 		} else {
+
+			ptr += strspn(ptr, "\n=\t ");
 
 			if ((val = strsep(&ptr, "\0")) == NULL) {
 				fprintf(stderr, "[warning] invalid configuration entry on line %ld: '%s'\n", line, str);
