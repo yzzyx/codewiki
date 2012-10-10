@@ -1,0 +1,63 @@
+
+codewiki - capable wiki-system with small memory footprint
+==========================================================
+
+0. WHY
+
+Because most wiki's turned out to be resource hogs,
+even though the core task is trivial. Requiring e.g.
+mysql for a small wiki is insane. And the fact that
+they're all interpreted means they have an overhead
+of several megabytes even if they do nothing at all.
+
+And because I suffer from a rampant case of NIH.
+
+1. HOW
+
+codewiki
+First, setup your codewiki (configfile does not yet exist)
+
+1.b fastcgi
+
+If using fastcgi, this is for you.
+
+Use spawn-fcgi. It's good for you.
+
+Example::
+	$ spawn-fcgi -p 8888 codewiki-fcgi
+
+In lighttpd, the following config should do it
+(if you have the fastcgi module enabled):
+
+::
+	server.modules += ( "mod_fastcgi" )
+	server.modules += ( "mod_rewrite" )
+
+	fastcgi.server += ( "/codewiki.fcgi" =>
+			((
+					"host" => "127.0.0.1",
+					"port" => "8888",
+					"check-local" => "disable",
+					"broken-scriptfilename" => "enable",
+			))
+	)
+
+	url.rewrite-once = ( "^(/wiki/.*)$" => "/codewiki.fcgi$1", )
+
+If you want to use X-Sendfile (recommended), also add the following to
+the fastcgi.server-section:
+
+::
+	"allow-x-send-file" => "enable"
+
+and set 'use-xsendfile = 1' in codewiki.conf
+
+codewiki by default sends any requests for static contents to /static.
+This can be changed by setting 'static_url' in codewiki.conf.
+Also, remember to copy the contents of the static-directory to this location.
+
+
+That's the basic setup.
+
+2. TODO
+Lots. We're in alpha still.
