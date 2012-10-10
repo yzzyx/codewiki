@@ -24,6 +24,11 @@
 #include <malloc.h>
 #include <ctype.h>
 #include <time.h>
+#ifdef HAVE_UTIL_H
+#include <util.h>
+#else
+#include "extra/util.h"
+#endif
 #include "codewiki.h"
 
 #ifdef HAVE_CRYPT_H
@@ -645,7 +650,47 @@ wiki_request_serve(struct wiki_request *r)
 static int
 wiki_load_config_fd(FILE *fd)
 {
+	size_t len;
+	size_t line;
+	char *str, *ptr,  *key, *val;
+
 	/* fparseln() ... */
+	for (;;) {
+		if ((str = fparseln(fd, &len, &line, NULL, 0)) == NULL)
+			if (feof(fd) || ferror(fd))
+				break;
+		
+		ptr = str + strspn(str, "\n\t ");
+		if (ptr[0] == '\0') { /* empty */
+			free(str);
+			continue;
+		}
+
+		key = strsep(&ptr, "\n=\t ");
+		if (key == NULL || ptr == NULL) {
+			fprintf(stderr, "[warning] invalid configuration entry on line %ld: '%s'\n", line, str);
+		} else {
+
+			if ((val = strsep(&ptr, "\0")) == NULL) {
+				fprintf(stderr, "[warning] invalid configuration entry on line %ld: '%s'\n", line, str);
+				free(str);
+				continue;
+			}
+
+			if (strcmp(key, "static_url") == 0) {
+				config.static_url = strdup(val);
+			} else if (strcmp(key, "base_url") == 0) {
+				config.base_url = strdup(val);
+			} else if (strcmp(key, "contents_dir") == 0) {
+				config.contents_dir = strdup(val);
+			} else if (strcmp(key, "use_xsendfile") == 0) {
+				config.use_xsendfile = atoi(val);
+			} else {
+				fprintf(stderr, "[warning] unknown key in config-file on line %ld: '%s'\n", line, key);
+			}
+		}
+		free(str);
+	}
 	return (0);
 }
 
@@ -662,6 +707,13 @@ wiki_load_config()
 	char		*filename, *ptr;
 	int		cnt;
 	char		path[PATH_MAX];
+
+	/* Setup defaults */
+	config.static_url = "/static";
+	config.base_url = "/wiki";
+	config.contents_dir = printf_strdup("%s/.contents",
+	    getcwd(path, sizeof path));
+	config.use_xsendfile = 0;
 
 	/* Try the following:
 	 * $CODEWIKI_CONFIG
@@ -688,13 +740,6 @@ wiki_load_config()
 		filename = filename_list[cnt++];
 	} while (filename != NULL);
 
-	if (filename == NULL) {
-		config.static_url = "/static";
-		config.base_url = "/wiki";
-		config.contents_dir = printf_strdup("%s/.contents",
-		    getcwd(path, sizeof path));
-		config.use_xsendfile = 1;
-	}
 
 	return (0);
 }
